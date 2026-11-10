@@ -1,7 +1,14 @@
 # First-install SRAM commissioning
 
-**Commissioning service implemented offline; not hardware-qualified.** The user
-selected an embedded pre-boot service rather than a temporary ROM pair or external
+This document explains how the firmware extension's persistent storage is set up the
+first time the modified chips go into a machine whose battery-backed SRAM already holds
+data: why a pre-boot commissioning service is needed, what it archives, how it
+initializes storage without destroying history, and what remains unqualified. It is
+for readers who want the procedure and its safety reasoning; the exact memory map,
+payloads and framing are in [COMMISSIONING-CONTRACT.md](COMMISSIONING-CONTRACT.md).
+
+**Status: commissioning service implemented offline; not hardware-qualified.** The
+owner chose an embedded pre-boot service over a temporary ROM pair or an external
 powered SRAM programmer. The later [limited live bring-up](../notes/firmware-bringup.md)
 reached normal runtime without commissioning INIT. It did not qualify this service's
 physical capture/initialization transport or electrical failure behavior.
@@ -64,8 +71,8 @@ the Linux SAS host) and `SAS_PORT` (the adapter's serial device there), and exit
 before any SSH call without them; `SAS_DIR` optionally names the remote mirror
 (default `blazing-7s`). Setup: [`notes/sas-j10.md`](../notes/sas-j10.md),
 **SAS host setup**. Run directly on the SAS host, `sas_commission.py` needs
-`--port <device>`; it has no default. No special password is added, but explicit first-install intent
-and state checks are mandatory.
+`--port <device>`; it has no default. No special password is added, but explicit
+first-install intent and state checks are mandatory.
 
 ## Transaction and refusal policy
 
@@ -105,8 +112,8 @@ commissioning it stops irreversibly in a watchdog-serviced halt and never return
 to a pending persistence write. Outside commissioning it retains the native path.
 This is a software boundary, not proof of electrical write inhibition.
 
-J10 is U39/DUART2 B through U40: schematic AS-03356-0424 sheets14-19 and14-8 trace
-TXD4/RXD4 to pins3/5. The adapter uses explicit byte-register initialization, no
+J10 is U39/DUART2 B through U40: schematic AS-03356-0424 sheets 14-19 and 14-8 trace
+TXD4/RXD4 to pins 3/5. The adapter uses explicit byte-register initialization, no
 RTOS calls, no ordinary serial startup and no unrelated DUART output changes.
 Frames have delimiter/escape encoding, bounded buffers and CRC32; UART errors
 invalidate partial input. The host imposes a total reply deadline and byte limit.
@@ -153,9 +160,9 @@ Remaining physical qualification, not closed by the limited live bring-up:
   use the stock fatal CPU halt, not reel de-energization; fault-latch behavior and
   a credits/request-history-preserving recovery procedure still need qualification.
 - [ ] Actual T48/blank-chip bench qualification. [PROGRAMMING.md](PROGRAMMING.md)
-  records the user's Winbond W27C02/DA85 spares and matching advertised support,
+  records the owner's Winbond W27C02/DA85 spares and matching advertised support,
   plus the original dump's ST reference, exact 256 KiB packaging and successful
-  full-lane readback comparisons after user programming. Actual markings/speed,
+  full-lane readback comparisons after the owner programmed them. Actual markings/speed,
   authenticity, installed algorithm and electrical/timing margins remain unverified.
   Preserve original chips and dumps; do not erase originals.
 

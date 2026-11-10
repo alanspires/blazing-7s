@@ -4,7 +4,7 @@ Reverse engineering of one Bally ProSlot 6000 "Blazing 7s" machine that the user
 
 ## Ground truth
 
-- `roms/*.bin` are the original dumps, merged for the 16-bit bus: the even chip (U28 / U20) supplies the high byte at even addresses. Never modify them; tools, tests and the firmware build read them as hash-pinned inputs and as test oracles.
+- `roms/*.bin` are the original dumps, merged for the 16-bit bus: the even chip (U28 / U20) supplies the high byte at even addresses. Never modify them; tools, tests and the firmware build read them as inputs and test oracles, and the main program and installed personality images are hash-pinned (`firmware/build.py`, `tools/sas_profile.py`).
 - The machine runs main program S6M00002B5 with personality **E595211X-05**, despite its "SMI7156" sticker; the SAS ROM signature confirmed the pairing (`roms/README.md`). Addresses in notes, code and tests are CPU addresses in that main program's map unless stated otherwise.
 - Prefer checking a claim against the ROM bytes (ideally in a test that reads `roms/`) over restating a number. Function names cited in notes and code are the ones set in the Ghidra project (`.rules/ghidra.md`).
 - `docs/` holds vendor manuals, vendor software and the IGT SAS 6.02 specification; they and `roms/` are third-party works, not covered by the MIT `LICENSE`. Code cites spec sections or tables for every layout; keep those citations when changing a layout.

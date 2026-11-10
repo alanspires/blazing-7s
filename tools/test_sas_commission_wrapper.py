@@ -1,4 +1,4 @@
-"""Execute the real Mac wrapper; SSH and rsync terminate at local process fakes."""
+"""Execute the real tools/sas wrapper; SSH and rsync terminate at local process fakes."""
 
 import os
 import subprocess

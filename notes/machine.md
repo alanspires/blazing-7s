@@ -1,4 +1,9 @@
-# Our machine: Bally ProSlot 6000 "Blazing 7s"
+# The machine: Bally ProSlot 6000 "Blazing 7s"
+
+What this privately owned slot machine is, board by board: the game, the MPU (main
+processor unit) board and its chips, the DIP switches, the peripherals and the
+backplane connectors, and what that means for talking to it over a serial port. It is
+the hardware reference the other notes build on.
 
 Observed on the machine on 2026-10-17, from photographs taken that day that are not
 distributed with this repository. **Verified** = read on the machine in those
@@ -31,22 +36,22 @@ gives E595211X-05 (SMI 6892) a 14.07 % hit frequency, 90.85 % max-coin payback a
 |---|---|
 | Assembly | S6000 MPU AS-03356-0424 **Rev G**, ©1997, date code 0308 |
 | CPU | Motorola MC68HC000FN16 (U31, PLCC) |
-| Serial | 3 × Philips SCN68681C1N40 DUARTs |
-| Parallel I/O | 2 × CMD G65SC22 VIAs (U41/U42); U41 reads **G65SC22PI-2**, marked `0304` (both VIAs in `photos/05-mpu-eproms.jpg`) |
+| Serial | 3 × Philips SCN68681C1N40 DUARTs (dual UARTs: two serial channels each) |
+| Parallel I/O | 2 × CMD G65SC22 VIAs, U41/U42 (versatile interface adapters: parallel ports and timers); U41 reads **G65SC22PI-2**, marked `0304` (both VIAs in `photos/05-mpu-eproms.jpg`) |
 | Sound | Yamaha YM2149F (U52) |
 | Main program | U28 / U43 "BALLY 6000 LEAVE-IN MAIN" → `roms/s6000_main_S6M00002B5.bin` (labels match). The later `photos/05-mpu-eproms.jpg` shows chips labelled "BALLY 6000 MAIN W/PRINTER" in these sockets (inferred: the reprogrammed spares of `firmware/PROGRAMMING.md`) |
 | Personality | U20 / U18 "E595211X-05 SMI7156" → `roms/personality_E595211X-05.bin` |
-| RAM | Samsung K6T1008C2E (128K×8) plus U30, a 32-pin part under a torn Bally copyright label (both in `photos/05-mpu-eproms.jpg`) |
+| RAM | Samsung K6T1008C2E (128K×8) plus U30, a 32-pin part under a torn Microtec Research software copyright label (both in `photos/05-mpu-eproms.jpg`) |
 | Battery | Tadiran lithium, BATT1 |
-| Logic | PALs E-01055-0041, -0044, -0045, -0047 |
+| Logic | PALs (programmable logic chips) E-01055-0041, -0044, -0045, -0047 |
 | DIP switches | DS1 next to U24/RP20; DS2 and DS3 end to end below the YM2149F; settings below |
 | J3 (HHU) | 10-pin header on the front edge; U70 next to it is a Maxim MAX1406CPE (date 0301), a 16-pin RS-232 transceiver that replaces the MC145406 in the drawing |
 | Second MAX1406CPE | above SN75ALS195N / SN75ALS194N (RS-422 receivers/drivers) near DS1 |
 | Card cage | AS-06605-0001 Rev G, UDT 0312-4; a site and sales-order label (the original casino order, inferred; not reproduced here, pixelated in the photo); TEST, COIN MECH, PSEUDO COIN, RESET (`photos/04-mpu-in-card-cage.jpg`) |
 
-U30 (torn Bally label) is not firmware: the schematic (p.14-12 and p.14-17) draws it as
-an 841001 128K×8 SRAM holding data bits D8–D15, the partner of U45 (D0–D7), together the
-scratch RAM and SafeRAM.
+U30 (the torn software label) is not firmware: the schematic (p.14-12 and p.14-17) draws
+it as an 841001 128K×8 SRAM holding data bits D8–D15, the partner of U45 (D0–D7),
+together the scratch RAM and SafeRAM (the battery-backed RAM area).
 
 Memory map (schematic MK14-S6MOD-0001, applied in the Ghidra project): MAINS
 `000000-0FFFFF`, PERSONALITY `100000-11FFFF`, scratch RAM `400000-437FFF`,
@@ -81,9 +86,9 @@ first digit = switches 5–8, OFF = 1): these readings predict **80**, **29** an
 | Mikohn 341-010-30 board | four UDN2944W quad high-current source drivers (QP1–QP4), SN74LS122N, a 74HC32-type gate, 10-pin headers at both ends, power plug J4; purpose not confirmed (a lamp driver, inferred from its parts) | observed 2026-10-17 |
 | Mikohn PCB, solder side | silkscreen "... CHAM2 ... ©1989,90 by MIKOHN Inc.", only partly legible | observed 2026-10-17 |
 | Electromechanical meters | TOTAL IN 1524511, TOTAL OUT 6198504, DROP 3619331 (bracket AS4225-064, label LBL-180-3 Rev A) | observed 2026-10-17 |
-| TITO@Home 4.0 | aftermarket board on the cabinet floor, four loose wires (red, black, orange, purple) pushed into backplane J10 SYSTEM | observed 2026-10-17 |
+| TITO@Home 4.0 | aftermarket ticket-in, ticket-out (TITO) board on the cabinet floor; five wires (red, orange, purple and two black) in one housing on backplane J10 SYSTEM | observed 2026-10-17; the housing, now reused for the SAS cable, in `photos/06-j10-sas-cable.jpg` |
 | Aux board | small board on the left wall, silkscreen "BM-3" and "MEXICO", label "01-00-2607 S"; relay K1, U1 under the label, LED1, regulator-style U2, connectors P1–P3; purpose unknown | observed 2026-10-17 |
-| Power | Bally low-leakage supply, Pacific Transformer E122-21xx (03-01), breaker box with 2.5/2.5/5/5 A push-to-reset breakers and ON/OFF switch | observed 2026-10-17; supply label in `photos/02-door-open.jpg` |
+| Power | Bally low-leakage supply, Pacific Transformer E122-21xx (03-01), breaker box with 2.5/2.5/5/5 A push-to-reset breakers and ON/OFF switch | observed 2026-10-17; breaker box and supply label in `photos/02-door-open.jpg` |
 
 ## Backplane (observed 2026-10-17; `photos/03-interface-board.jpg`)
 

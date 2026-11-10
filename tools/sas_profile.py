@@ -391,7 +391,7 @@ def _bet_ranges(profile: Profile) -> list[tuple[int, int]]:
     for payout in profile.payouts:
         edges.update((payout.min_bet, payout.max_bet + 1))
     edges = sorted(edge for edge in edges if edge <= profile.max_bet_per_line + 1)
-    return list(zip(edges, edges[1:]))  # noqa: RUF007 -- itertools.pairwise needs 3.10; this Mac has 3.9
+    return list(zip(edges, edges[1:]))  # noqa: RUF007 -- itertools.pairwise needs 3.10; the stdlib suites run on macOS's python3 3.9
 
 
 def _matches(game: Game, wanted: tuple[int, ...], seen: tuple[int, ...]) -> bool:

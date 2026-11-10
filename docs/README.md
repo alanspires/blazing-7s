@@ -1,7 +1,16 @@
 # Reference documents
 
-Copies of the documents relevant to our ProSlot 6000, renamed for clarity. The Source
-column names each file as found in the author's collection of vendor and forum downloads.
+Vendor manuals, datasheets, the SAS protocol specification and vendor software that
+apply to this ProSlot 6000 and its peripherals, for anyone following the notes. They
+are third-party works owned by their publishers (Bally, IGT, Mikohn, JCM,
+STMicroelectronics, California Micro Devices and the other authors named below),
+included for reference and not covered by this repository's MIT license. Files are
+renamed for clarity; the Source column names each file as it was found in the
+author's collection of vendor and forum downloads.
+
+Terms used below: TITO is ticket-in, ticket-out; TITO@Home is an aftermarket board
+that adds it to home machines. HHU is the label of the MPU board's J3 serial header.
+PSP is Mikohn's Progressive System Programmer software.
 
 ## bally-s6000/
 
@@ -13,7 +22,7 @@ column names each file as found in the author's collection of vendor and forum d
 | `option-card-blazing-7-settings-11d.pdf` | ProSlot 6000 option card M-00500-0130 (Test 11d options) | `Bally S6000/Bally S6000 Blazing 7 Setting 11d.pdf` |
 | `tito-option-settings-printer-no-hopper.pdf` | option values for TITO with printer, no hopper (98 Primary Host 1, 92 SAS Bonusing 3, …) | `Bally S6000/TITO Menu settings Bally 6000 printer-no hopper.pdf` |
 | `tito-harness-j10-pinout.pdf` | J10 SYSTEM pins for TITO: 1 GND, 3 TX, 5 RX, 13 GND, 31 +12 V | `Bally S6000/Bally S6000 TITO harness Pinout J10 .pdf` |
-| `tito-harness-j10-photo.jpeg` | photo of that J10 harness (same wire colours as ours) | `Bally S6000/875529C7-…jpeg` |
+| `tito-harness-j10-photo.jpeg` | photo of that J10 harness (the same wire colours as this machine's) | `Bally S6000/875529C7-…jpeg` |
 | `tito-at-home-forum-fix-option-92-19hi.png` | forum fix: option 92 SAS Bonusing = 2 and 19HI = 0 made TITO@Home print | `Bally S6000/TITO Settings.PNG` |
 | `mikohn-settings-blazing-7.pdf` | Mikohn PSP jackpot screens that worked on an S6000 (M-04/MS08 or M-08/MS00); the "Blazing 8" copy is identical and was left out | `Bally S6000/Mikohn setting for Bally S6000 Blazing 7.pdf` |
 | `game-list-2008-09-30.xls` | Bally S6000 game list | `Bally S6000/Bally series 6000 game list as of Sept 30 2008.xls` |
@@ -23,25 +32,27 @@ column names each file as found in the author's collection of vendor and forum d
 
 | File | What it is | Source |
 |---|---|---|
-| `IGT-SAS-6.02-protocol-specification.pdf` | the SAS protocol (190 pp); the copy in `Project/` is identical | `SAS Specifications.pdf` |
+| `IGT-SAS-6.02-protocol-specification.pdf` | the SAS protocol (190 pp); a second copy in the collection's `Project/` folder is identical | `SAS Specifications.pdf` |
 | `montana-sas-implementation-guide-1.2.1.pdf` | Montana's SAS implementation guide | `sasimplementationguide.pdf` |
 | `sastest-simulator/`, `sastest-simulator-2021/` | Windows SAS host test tool (`sastest.exe`, `sastest2021.exe`) with its config and help | `SAS Simulator/`, `SAS Simulator 2/` |
 
 ## tito-at-home/
 
-TITO@Home 4.0 guides for the board in our cabinet: `bally-s6000-tito-settings-v4.pdf`,
+TITO@Home 4.0 guides for the board in this cabinet: `bally-s6000-tito-settings-v4.pdf`,
 `tito-dip-switches.pdf` (free-play switches), `tito-flash-instructions.pdf`
 (from `TITO @ Home Install Info/TITO 4.0 instructions/`).
 
 ## bill-acceptor-jcm-wba/
 
-JCM WBA series (ours is a WBA-12-SS): quick reference card, flip-book manual,
-exploded views, harness pinout (from `Bill Validators/WBA/` and
-`Bill Validators/JCM WBA Quick Reference Card.pdf`).
+JCM WBA series bill acceptor (this machine's is a WBA-12-SS): quick reference card,
+series manual, flip-book manual, exploded views for the SS, SS3B, SH and SU variants,
+and the harness pinout (from `Bill Validators/WBA/` and
+`Bill Validators/JCM WBA Quick Reference Card.pdf`). The files keep their original
+names.
 
 ## progressive/
 
-The top sign and link progressive (J14 LINK 485). Our top box holds a Mikohn CHAMII+
+The top sign and link progressive (J14 LINK 485). This machine's top box holds a Mikohn CHAMII+
 logic board (label 341-075-05 "CSTLR STND ALONE(BLY)", observed on 2026-10-17 from
 photographs that are not distributed), so the CHAMII+ manual and PSP software below apply.
 
@@ -76,7 +87,8 @@ Provenance and hashes are in `components/README.md`.
 
 ## Left out
 
-Bally Alpha/S9000, the rest of the S5500 set (a different model), IGT backup notes,
+These parts of the source collection do not apply to this machine and are not
+included: Bally Alpha/S9000, the rest of the S5500 set (a different model), IGT backup notes,
 other bill validators (DBV, UBA, EB-100, MEI, Rowe), TITO guides for other platforms,
 Paltronics, BSK100, the empty `Supreme Display User Manual.pdf`, the Mikohn LED
 replacement project, and the GQ-4X chip list. The ROM dumps live in `../roms/`.

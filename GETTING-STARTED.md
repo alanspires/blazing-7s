@@ -1,8 +1,11 @@
 # Getting started
 
-Everything the tests and the firmware build need is in the clone: the ROM dumps, the
-vendor documents and the Ghidra project. Nothing here touches a real machine; the
-tests drive scripted fakes and a CPU emulator.
+How to run the tests, build the experimental firmware, open the Ghidra project and
+connect the SAS tools to your own machine, for anyone with a fresh clone. Everything
+the tests and the firmware build read is in the clone: the ROM dumps in `roms/` and
+the captured machine replies in `tools/fixtures/`. The vendor documents (`docs/`) and
+the Ghidra project (`ghidra/`) are there for reference. Nothing in the tests or the
+build touches a real machine; the tests drive scripted fakes and a CPU emulator.
 
 There are two routes: the dev container, which needs only Docker, or a native
 install on macOS.
@@ -66,6 +69,20 @@ firmware/.venv/bin/python firmware/build.py firmware/patches.json
 
 On Linux, use the dev container; it is the tested Linux route.
 
+## What the tests cover
+
+The host-tool tests (`tools/test_*.py` in the unittest list above) need only the
+Python standard library. The SAS command table and the J3 CRC are checked against the
+ROM; each SAS command runs through the CLI against a scripted machine. Real replies in
+`tools/fixtures/` must decode consistently; captured profile-switch replies also
+exercise the per-operation receive budget without wall-clock waits.
+
+The full pytest suite adds the firmware tests in `firmware/tests/`, which run the
+compiled extension and the original ROM routines around it in a CPU emulator, and the
+tools tests that need the firmware environment: the commissioning wrapper and the
+compiled-firmware integration tests (`tools/test_sas_commission_wrapper.py`,
+`tools/test_sas_commission_firmware.py`, `tools/test_sas_firmware.py`).
+
 ## Check the build
 
 `firmware/build/main.bin` must match the **Published image SHA-256** in
@@ -75,15 +92,17 @@ On Linux, use the dev container; it is the tested Linux route.
 shasum -a 256 firmware/build/main.bin   # macOS; sha256sum on Linux
 ```
 
-`main.bin` and the two chip images reproduce across toolchain builds; the ELF, map and
-manifest do not (`firmware/toolchain.md`, **Outputs and reproducibility**). The build
+`main.bin` and the two chip images reproduce across the macOS and Linux builds of the
+pinned toolchain; the ELF, map and manifest do not
+(`firmware/toolchain.md`, **Outputs and reproducibility**). The build
 is experimental and never marked installation-ready (`firmware/README.md`).
 
 ## Talking to a real machine
 
 The SAS tools run on a Linux computer wired to the machine's J10 port through an
 FTDI USB RS-232 adapter. `notes/sas-j10.md` covers the wiring, the voltage check and
-**SAS host setup**. In short, from another computer with passwordless SSH to that host:
+**SAS host setup**. In short, from another computer (macOS or Linux) with passwordless
+SSH to that host and `rsync` on both ends:
 
 ```sh
 export SAS_HOST=user@sas-host SAS_PORT=/dev/ttyUSB0   # required; no defaults
@@ -94,11 +113,15 @@ tools/sas meters
 `tools/sas profile-preview` work without either variable. On the SAS host itself, run
 `python3 tools/sas.py --port <device> <command>`. The firmware extension commands need
 the modified firmware (`firmware/README.md`); state-changing commands act at once,
-without confirmation.
+without confirmation. Read `notes/sas-j10.md`, **Money test**, before running
+`tools/sas money-test`: it withdraws the entire cashable balance before restoring it,
+and every movement stays in the lifetime meters. The payout and outcome features are
+for a privately owned machine used for entertainment, not for regulated or commercial
+gaming machines.
 
 ## Opening the Ghidra project
 
-The project needs Ghidra 12.2 or newer (Java 25). Open it with a neutral user name so
+The project needs Ghidra 12.2 or newer (Java 25 or newer). Open it with a neutral user name so
 your own stays out of the saved history:
 
 ```sh

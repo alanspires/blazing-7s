@@ -1,15 +1,21 @@
 # T48 / main-program EPROM qualification
 
-**Research and a future procedure, not authorization to program or install.**
+This document covers putting the experimental firmware on EPROMs: which chips the
+images are for, how they relate to the original dumps, the verified image hashes,
+the readback record of the spares the owner programmed with an XGecu T48 programmer,
+and a bench procedure for any future programming. It is for readers who want to
+reproduce or check the chip images.
+
+**Status: research and a future procedure, not authorization to program or install.**
 The experimental images remain `install_ready: false`. Preserve the original
-U28/U43 chips intact; do not erase them. Initial research was offline. The user
+U28/U43 chips intact; do not erase them. Initial research was offline. The owner
 subsequently programmed spares; full readbacks were compared as recorded below,
 and limited machine checks are in [the live record](../notes/firmware-bringup.md).
 Neither activity closes all physical qualification gates.
 
 ## Available spares: Winbond W27C02
 
-The user reports spare chips containing different firmware, labeled
+The owner reports spare chips containing different firmware, labeled
 “Main W/PRINTER”; the T48 detects `W27C02` and reports device ID `DA 85`.
 The saved `U28_WPrinterSupport` / `U43_WPrinterSupport` dump filenames also
 identify `W27C020@DIP32`. These are spares, not authorization to erase them.
@@ -57,9 +63,11 @@ board's address decoding or electrical compatibility.
 
 ### Verified offline Winbond packaging
 
-**Independent packaging review approved all six scoped files. The exact eight
-verified artifacts are published locally in `firmware/build/`; copied bytes and
-all20 inputs were rechecked. No programming or installation is authorized.**
+**An independent packaging review approved all six files in its scope. The exact
+eight verified artifacts were published locally in `firmware/build/` (not committed;
+a fresh build regenerates `main.bin` and the chip images with the hashes below);
+copied bytes and all 20 inputs were rechecked. No programming or installation is
+authorized.**
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -71,13 +79,13 @@ The merged 524,288-byte `main.bin` remains
 The packaging manifest is
 `ef1728ca2cb342666e6b31ebee1be8fdc411322b36f7c509c67dfb296b5f7b01`.
 Its format is `s6000-offline-build/2`: one common `programming_device` identifies
-Winbond W27C020, alias W27C02, DIP32, capacity262144, manufacturerID218 (DAh)
-and deviceID133 (85h). `chips` maps each filename to its lane; there is no
+Winbond W27C020, alias W27C02, DIP32, capacity 262144, manufacturer ID 218 (DAh)
+and device ID 133 (85h). `chips` maps each filename to its lane; there is no
 repetition field or legacy mirrored-output option. This is the intended target
-matching the user's report, **not a physical identification or compatibility
+matching the owner's report, **not a physical identification or compatibility
 measurement**. `install_ready` remains false.
 
-All53 builder tests passed, including exact full-lane reconstruction, emitted
+All 53 builder tests passed, including exact full-lane reconstruction, emitted
 file/metadata/hash consistency, invalid main-size rejection and reproducibility.
 The packaging tests reject the old mirrored splitter. Two independent production
 builds from different checkout/output directories reproduced all eight artifacts.
@@ -85,17 +93,17 @@ builds from different checkout/output directories reproduced all eight artifacts
 the stack-qualified build. Both builds used the same toolchain installation; across
 toolchain builds only `main.bin` and the chip images are expected to reproduce
 (`toolchain.md`, **Outputs and reproducibility**), so the manifest hash above is
-this record's, not one a fresh build must match. All20 input hashes were checked; only `build.py`
-changed. Native patches, symbols, compiler commands, checksum and original ROMs
+this record's, not one a fresh build must match. All 20 input hashes were checked;
+only `build.py` changed. Native patches, symbols, compiler commands, checksum and original ROMs
 are unchanged. Thus this packaging revision does not change the previously
 reviewed runtime code or stack proof.
 
-### User-programmed spare readback checks
+### Owner-programmed spare readback checks
 
-The user chose to proceed without the requested additional chip-marking/Xgpro
-screenshots. Do not treat that waiver as physical identification or algorithm
-qualification. Programming was performed by the user, not through assistant
-access to the programmer.
+The owner chose to proceed without additional chip-marking and Xgpro screenshots.
+Do not treat that waiver as physical identification or algorithm qualification.
+The owner operated the programmer directly; the readback files below are what it
+produced.
 
 - The U28 readback file: exactly 262,144 bytes; full equality to `U28_even.bin`,
   SHA-256 `5e45a82f45ad1d482a6989ecd89c0198bd1ce517c574beb7cbbb811ba04eff0c`.
@@ -110,7 +118,7 @@ access to the programmer.
   U28 reference matching the earlier readback hash. It equaled `main.bin` exactly
   and had boot word sum zero. This was not a second read of the physical U28 chip.
 
-No further flashing was needed on this evidence. The user then reported installing
+No further flashing was needed on this evidence. The owner then reported installing
 the pair and a normal idle display. Readback equality does not establish installed
 address decoding, operating margins or complete machine behavior.
 
@@ -123,12 +131,13 @@ has header date `17.3.2026`, 37,103 devices, and explicitly lists
 The complete downloaded list's SHA-256 is
 `bfd9e2836334b5954197da18c7a82b0ef0cc41a428bce5279cbbd8294999edc1`.
 The publisher's direct list could not be fetched; the list evidence is a mirror,
-not a measurement or inspection of the user's installed programmer algorithm.
+not a measurement or inspection of the owner's installed programmer algorithm.
 
-This establishes advertised support. It does **not** establish the user's Xgpro
+This establishes advertised support. It does **not** establish the owner's Xgpro
 version, selected profile, actual output voltages, device authenticity or successful
-programming. The motherboard's Winbond SPI profile, SOIC adapter and voltage are
-not applicable to these parallel EPROMs.
+programming. The T48 settings from an earlier, unrelated motherboard flash-chip job
+(a Winbond SPI profile, a SOIC adapter and that chip's voltage) are not applicable
+to these parallel EPROMs.
 
 ### ST device requirements
 
@@ -152,7 +161,7 @@ provides these requirements:
   not electrically erase an ST UV EPROM; OTP cannot be erased for reuse.
 
 This ST reference explains the device named by the original dump files. It is
-**not the profile to use for the user's Winbond spares**. Windowed ST `F` parts
+**not the profile to use for the owner's Winbond spares**. Windowed ST `F` parts
 would need a proper enclosed UV eraser for reuse; blank OTP `B` parts are one-use.
 Neither a physical ST part nor its speed/authenticity has been qualified here.
 Device identification, not a firmware sticker or old dump filename, determines
@@ -165,7 +174,7 @@ Only after separate approval and identification of the actual spare chips:
 1. Record each blank's complete markings, package and pin-1 orientation, Xgpro
    version and exact device selection. Confirm its datasheet, board voltage/timing
    requirements, and the software's socket-placement diagram. Do not reuse the
-   motherboard adapter or infer ZIF placement from its center.
+   motherboard job's SOIC adapter or infer ZIF placement from its center.
 2. Keep originals separately labeled U28/U43. Program spares out of circuit;
    do not use an in-circuit clip or move board jumpers for this procedure.
 3. Preserve fresh full-device reads of the Winbond spares before a separately
@@ -191,20 +200,20 @@ Only after separate approval and identification of the actual spare chips:
 The existing slot-chip dumps contain **no export trailer**. A different-length
 readback is not accepted or silently truncated. Select a documented raw export
 or first establish the export format; the 1,040-byte trailer encountered in the
-motherboard workflow is not a general T48 rule.
+motherboard job is not a general T48 rule.
 
 ## Remaining gates
 
 - [x] T48 catalogue selections located; ST requirements retained; original/build
-  image organization verified. User-reported W27C02/DA85 spares matched to the
+  image organization verified. Owner-reported W27C02/DA85 spares matched to the
   Winbond identification table and 256 KiB capacity.
 - [x] Prepare and verify exact 256 KiB images for the Winbond spares offline.
 - [x] Independent packaging review and exact-artifact local publication; no hardware approval.
 - [ ] Actual spare part markings, suffix, authenticity and board timing compatibility.
-- [x] User-provided full-chip readbacks independently compared with both intended
+- [x] Owner-provided full-chip readbacks independently compared with both intended
   256 KiB lane images; initial U43 mismatch resolved as recorded above.
 - [ ] Installed Xgpro/device algorithm, placement, blank-check and physical part
-  identity independently verified; the user waived the additional screenshot check.
+  identity independently verified; the owner waived the additional screenshot check.
 - [ ] Remaining firmware, SRAM, power-fail, watchdog, interrupt and machine-behavior
   gates in [PROVISIONING.md](PROVISIONING.md); limited bring-up is not closure.
 

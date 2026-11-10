@@ -7,14 +7,15 @@ The machine is a Bally ProSlot 6000 "Blazing 7s": three reels, one payline, $1 a
 once built for a casino floor and now privately owned. Nobody hands you the internals
 of one of these, so this repository is what it took to understand it:
 
-- **Reading the chips.** The EPROMs came off the MPU board and were dumped and merged
-  into the 68000 main program and the game's personality ROM. A Ghidra project names
-  the functions the notes and code cite.
-- **Finding a way in.** Backplane connector J10 turned out to be the SAS port, the
-  serial protocol casinos use to talk to their machines. A Linux PC with a USB RS-232
-  adapter now speaks it: all 118 long polls the firmware accepts, read its meters, set
-  its clock, and move credits in and out. The J3 "HHU" port and the reel control were
-  traced too.
+- **Reading the chips.** The EPROMs came off the MPU (main processor unit) board and
+  were dumped and merged into the Motorola 68000 main program and the game's
+  personality ROM. A
+  Ghidra project names the functions the notes and code cite.
+- **Finding a way in.** Backplane connector J10 turned out to be the SAS port. SAS
+  (Slot Accounting System) is the serial protocol casinos use to talk to their
+  machines. A Linux PC with a USB RS-232 adapter now speaks it: it can send all 118 long
+  polls (SAS commands) the firmware accepts, read the meters, set the clock, and move
+  credits in and out. The J3 "HHU" port and the reel control were traced too.
 - **Teaching it new tricks.** An experimental firmware extension adds a private SAS
   command for remote game profiles (paylines, bet limits, payouts and reel stop
   weights), a chosen outcome for the next spin, and remote spins. It is built with a
@@ -44,42 +45,72 @@ vendor code. The author's own code and notes are MIT-licensed: see [LICENSE](LIC
 To run the tests, build the firmware or connect to your own machine, see
 [GETTING-STARTED.md](GETTING-STARTED.md).
 
+## Status
+
+- **SAS host tools: working.** On the stock firmware, `tools/sas` ran every read-only
+  command against the machine on 2026-10-17 and passed its write and money tests on
+  2026-10-18 (`notes/sas-j10.md`).
+- **Firmware extension: experimental.** Its image and chip files reproduce from a
+  fresh build, and it passes its offline CPU tests. A limited live bring-up on
+  2026-10-19 ran two stock spins, kept its state through an idle restart and
+  round-tripped a stock-equivalent profile (`notes/firmware-bringup.md`).
+  That is not full hardware qualification: every build manifest stays
+  not-install-ready, and diagnostic reel motion stays disabled.
+
+## Where to start
+
+- **The hardware:** `notes/machine.md` (boards, chips, switches, peripherals), then
+  `roms/README.md` (the chip dumps and which game is installed) and the
+  photos in `photos/`.
+- **Talking SAS to the machine:** `notes/sas-j10.md` (wiring, results, host timing and
+  the firmware's long-poll table), then `tools/sas help` and the **Talking to a real
+  machine** section of `GETTING-STARTED.md`.
+- **The firmware extension:** `firmware/README.md` (what is implemented, outputs,
+  CLI, verification and installation blockers), then `firmware/INTEGRATION.md`,
+  `notes/remote-game-config.md` and `notes/firmware-bringup.md`. The audit records
+  listed under **Firmware** below hold the detailed proofs.
+
 ## Index
 
-- `GETTING-STARTED.md` setup: the dev container or a native install, the test and
-  build commands, connecting to a machine, and the privacy check for contributors.
-- `LICENSE` MIT, for the author's own work.
-- `notes/machine.md` what the machine is: boards, chips, peripherals, as observed on
-  the machine.
+### Notes
+
+- `notes/machine.md` what the machine is: boards, chips, switches and peripherals, as
+  observed on the machine.
 - `notes/sas-j10.md` the SAS port on backplane J10: wiring, voltage and cable checks,
   SAS host setup, commands, what the machine reported, host timing it needs, the ROM
   signature check, and which SAS long polls the firmware accepts.
 - `notes/j3-hhu-protocol.md` what is known about the J3 (HHU) serial link.
 - `notes/reel-control.md` internal reel-motion and normal-outcome hooks and
   stop/symbol mapping. No stock serial reel-target command has been established.
-- `firmware/README.md` experimental chip images, CLI usage, offline verification
-  and installation blockers. `firmware/INTEGRATION.md` defines native hook contracts,
-  persistence and recovery; `firmware/toolchain.md` documents builds and CPU tests.
-  Limited live bring-up is recorded in `notes/firmware-bringup.md`: two stock
-  spins, idle-restart retention and a stock-equivalent profile round-trip.
-  This is not full hardware qualification; manifests remain not-install-ready
-  and diagnostic motion remains disabled.
 - `notes/remote-game-config.md` serial-only feasibility and the proposed runtime
   game profiles: wager cap, paylines, payouts and stop weights, with a reproduced
   nominal return calculation for the original game.
-- `photos/` seven photos of the machine (JPEG, 1600 px, metadata stripped,
-  identifier labels pixelated).
-- `docs/` vendor manuals, the IGT SAS 6.02 specification and vendor software
-  (`docs/README.md`).
-- `roms/` merged program images (68000 big-endian, even chip = high byte):
-  `s6000_main_S6M00002B5.bin` (U28 + U43 "LEAVE-IN MAIN"),
-  `personality_E595211X-05.bin` (U20 + U18, the installed game),
-  `personality_E725711X-05.bin` (another game), and the S6000 clear and printer-support
-  programs (`roms/README.md`).
-- `ghidra/proj/bally.gpr` Ghidra project (Ghidra 12.2 or newer);
-  `ghidra/scripts/S6000Setup.java` sets the memory map, personality ROM, vector table
-  and DUART labels (safe to rerun). `ghidra/run-headless.sh <Script.java>...` runs
-  scripts against a scratch copy of the project while the GUI holds the lock.
+- `notes/firmware-bringup.md` the limited live bring-up of the firmware extension,
+  with its captured evidence in `notes/firmware-bringup-evidence.json`,
+  `notes/firmware-cli-acceptance-evidence.json` and the `notes/firmware-reply-probe-*`
+  files.
+
+### Firmware
+
+- `firmware/README.md` experimental chip images, CLI usage, offline verification
+  and installation blockers.
+- `firmware/INTEGRATION.md` the extension's contract: native hook contracts,
+  persistence and recovery.
+- `firmware/toolchain.md` the build and the CPU-emulator tests.
+- `firmware/PROGRAMMING.md` programming the spare EPROMs and the readback checks.
+- `firmware/PROVISIONING.md` and `firmware/COMMISSIONING-CONTRACT.md` the pre-boot
+  first-install commissioning service.
+- Audit records of the original firmware and the extension's resource bounds:
+  `firmware/IRQ-AUDIT.md` (interrupts and profile publication),
+  `firmware/TASK-STACK-AUDIT.md` and `firmware/NATIVE-STACK-LEDGERS.md` (stack
+  usage), `firmware/INITIAL-ROOTS.md` (the initial and bootstrap stack roots) and
+  `firmware/SETTLEMENT-GUARD.md` (the settlement entry guard).
+- `firmware/src/`, `firmware/patches.json`, `firmware/link.ld` and `firmware/build.py`
+  the extension's source, patch specification, linker script and builder;
+  `firmware/tests/` its tests.
+
+### Tools
+
 - `tools/sas` runs the SAS CLI on the Linux SAS host over SSH (set `SAS_HOST` and
   `SAS_PORT`; `notes/sas-j10.md`, **SAS host setup**):
   `tools/sas list` shows all 118 long polls the firmware accepts, `tools/sas <name> ...`
@@ -108,30 +139,36 @@ To run the tests, build the firmware or connect to your own machine, see
 - `tools/privacy_check.py` scans a tree (`tree`) or an outgoing push (`push`, run by
   `.githooks/pre-push`) for personal details: image metadata, home paths, email
   addresses, `.pi/` and `.plans/` paths, and the author's private literals.
+- `tools/test_*.py` the host-tool tests and `tools/fixtures/` the real machine replies
+  they decode. What they cover and how to run them:
+  `GETTING-STARTED.md`, **What the tests cover**.
+
+### Reference material and analysis
+
+- `photos/` seven photos of the machine (JPEG, 1600 px on the long side, metadata
+  stripped, identifier labels pixelated).
+- `docs/` vendor manuals, the IGT SAS 6.02 specification and vendor software
+  (`docs/README.md`).
+- `roms/` merged program images (68000 big-endian, even chip = high byte):
+  `roms/s6000_main_S6M00002B5.bin` (U28 + U43 "LEAVE-IN MAIN"),
+  `roms/personality_E595211X-05.bin` (U20 + U18, the installed game),
+  `roms/personality_E725711X-05.bin` (another game), and the S6000 clear and
+  printer-support programs (`roms/README.md`).
+- `ghidra/proj/bally.gpr` Ghidra project (Ghidra 12.2 or newer);
+  `ghidra/scripts/S6000Setup.java` sets the memory map, personality ROM, vector table
+  and DUART labels (safe to rerun). `ghidra/run-headless.sh <Script.java>...` runs
+  scripts against a scratch copy of the project while the GUI holds the lock. To open
+  the GUI, see `GETTING-STARTED.md`, **Opening the Ghidra project**.
+
+### Repository
+
+- `GETTING-STARTED.md` setup: the dev container or a native install, the test and
+  build commands, connecting to a machine, and the privacy check for contributors.
 - `.devcontainer/` a dev container with the pinned m68k toolchain and Python
   environment, for the tests and the firmware build.
-- Host-only tests (no hardware):
-
-  ```sh
-  cd tools
-  python3 -m unittest test_sas_protocol test_sas_commands test_sas_cli \
-    test_sas_write_test test_sas_money_test test_bsg_frame test_sas_profile \
-    test_sas_extension test_sas_commission test_privacy_check
-  ```
-
-  The SAS command table and J3 CRC are checked against the ROM; each SAS command
-  runs through the CLI against a scripted machine. Real replies in `tools/fixtures/`
-  must decode consistently; captured profile-switch replies also exercise the
-  per-operation receive budget without wall-clock waits. The full suite, including
-  the commissioning wrapper tests and compiled CPU integration tests, runs with
-  pytest from the repository root:
-
-  ```sh
-  firmware/.venv/bin/python -m pytest firmware/tests tools
-  ```
-
-  Its virtualenv setup is in `firmware/toolchain.md`.
-
-Open the GUI (Ghidra 12.2 or newer, Java 25): `JAVA_TOOL_OPTIONS=-Duser.name=anon ghidraRun ghidra/proj/bally.gpr`.
-The user name keeps your own out of the saved history (`.rules/ghidra.md`, **No personal
-traces**).
+- `.githooks/pre-push` runs the privacy check on every push, once enabled
+  (`GETTING-STARTED.md`, **Contributing: keep personal details out**).
+- `.rules/` the working rules for changes to this repository: ground truth,
+  live-machine safety, privacy and verification (`.rules/global.md`), plus one file per
+  area.
+- `LICENSE` MIT, for the author's own work.

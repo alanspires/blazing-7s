@@ -9,7 +9,7 @@
 #   tools/sas profile-preview my.json          list, help and offline profile commands run here
 #   tools/sas profile-upload my.json           the local file is copied over for the upload
 #   tools/sas profile-download > active.json   the profile arrives on stdout
-#   tools/sas commission-capture original.json  archive on this Mac, never overwrite
+#   tools/sas commission-capture original.json  archive on this computer, never overwrite
 #   tools/sas commission-initialize original.json --first-install
 #                                             separate explicit pre-boot operation
 #

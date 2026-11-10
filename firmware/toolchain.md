@@ -1,9 +1,16 @@
 # Offline 68000 build and CPU-test toolchain
 
-This builds **experimental offline artifacts**, never installation-ready images.
+This document describes how the experimental firmware extension is compiled, packaged
+and tested: the native 68000 cross-compiler, the Python environment, the builder's
+input contract and outputs, and the CPU emulator the tests run compiled code on. It is
+for readers who want to reproduce the build or understand what the tests can and cannot
+show.
+
+The build produces **experimental offline artifacts**, never installation-ready images.
 It neither connects to hardware nor changes an original ROM. CPU execution cannot
-qualify unused ROM/RAM, interrupts, scheduling, SafeRAM recovery, optical sensors,
-motor behavior, identity compatibility, or actual machine operation.
+qualify unused ROM/RAM, interrupts, scheduling, SafeRAM (the battery-backed native
+accounting RAM) recovery, optical sensors, motor behavior, identity compatibility, or
+actual machine operation.
 
 ## Native tools and isolated Python
 
@@ -19,9 +26,10 @@ uv pip install --python firmware/.venv/bin/python --require-hashes -r firmware/r
 
 After dependencies are installed, compilation, packaging and tests are offline.
 No target OS, libc, startup files, original compiler, or remote executor is
-required. The dev container (`.devcontainer/`, see `GETTING-STARTED.md`) carries the
+required. The dev container (`.devcontainer/`, see `../GETTING-STARTED.md`) carries the
 same pinned compiler and binutils bottles and Python dependencies, as an alternative
-to installing them natively. `requirements.txt` pins all Python dependencies and package hashes;
+to installing them natively; inside it, use `python` in place of
+`firmware/.venv/bin/python`. `requirements.txt` pins all Python dependencies and package hashes;
 `requirements.in` records direct dependencies and the lock-generation command.
 The builder itself uses only the Python standard library.
 
@@ -35,8 +43,7 @@ warnings as errors. Soft float is already the default for this CPU. Explicit
 `-msoft-float` incorrectly selects the default (68020) multilib in GCC 16.2;
 compile, link and library queries therefore share only the `-m68000` target flag,
 and the build requires the selected multilib directory to be `m68000`.
-The **68000 multilib** static `libgcc.a` supplies
-compiler arithmetic helpers; unresolved references fail. It is not a target
+The **68000 multilib** static `libgcc.a` supplies compiler arithmetic helpers; unresolved references fail. It is not a target
 runtime dependency. The build records its hash and tool versions. No initialized
 C runtime is synthesized: BSS and ROM-to-RAM relocation segments are rejected.
 State must use explicitly allocated linker symbols and explicit initialization.
@@ -103,7 +110,7 @@ Unknown schema fields fail rather than silently ignoring an expected-byte safegu
   all actual patch ranges with original/replacement bytes, checksum ranges and
   compensation address, output hashes/sizes and chip byte sums. Format
   `s6000-offline-build/2` has one `programming_device` record for the fixed Winbond
-  target (part/alias, DIP32, capacity, manufacturerDA/device85) and filename-to-lane
+  target (part/alias, DIP32, capacity, manufacturer `DA`, device `85`) and filename-to-lane
   `chips` records without `repetitions`. These are target specifications, not
   verification of physical parts. `PROGRAMMING.md` records the offline packaging gate.
 
@@ -121,9 +128,10 @@ binutils 2.47 from the Homebrew bottles on macOS and on Linux (the dev container
 arm64 and amd64). `ext.elf`, `ext.map` and `manifest.json` differ between those
 toolchain builds even at the same versions: the bottles carry different `libgcc.a`
 builds, whose hash the manifest records and whose linked layout shows in the ELF, the
-map and the manifest's symbol table. `ext.dis` and `ext.stack` matched. Different compiler/binutils
-versions are not promised identical output; manifests identify those versions. Hashes establish provenance, not
-hardware safety. Every manifest sets `install_ready: false`.
+map and the manifest's symbol table. `ext.dis` and `ext.stack` matched. Different
+compiler/binutils versions are not promised identical output; manifests identify those
+versions. Hashes establish provenance, not hardware safety. Every manifest sets
+`install_ready: false`.
 
 ## CPU executor
 

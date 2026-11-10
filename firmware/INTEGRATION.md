@@ -1,8 +1,17 @@
 # S6000 extension implementation contract
 
-Status: offline prototype implemented and tested; **not installation qualified**.
+This is the contract between the firmware extension and the native S6M00002B5 ROM, and
+between the extension and its host client: the behavior it must provide, the profile
+format, the private E0 wire protocol, the native hook points, the RAM layout,
+persistence and recovery, stack boundaries and startup ordering. It is for readers who
+want to check the code in `src/` or `../tools/sas_extension.py` against the intended
+design, or to change either side. Addresses are CPU addresses in the main program's
+map; `FUN_xxxxxxxx` names are the Ghidra project's names for native routines.
+
+**Status: offline prototype implemented and tested; not installation qualified.**
 See `README.md` for the recorded gates, artifacts and outstanding qualification.
-No live machine operations are part of this build. Original ROMs remain inputs.
+The build involves no live machine operations. The original ROMs remain read-only
+inputs.
 
 ## Approved behavior
 
@@ -14,7 +23,7 @@ No live machine operations are part of this build. Original ROMs remain inputs.
 - CLI bet-and-spin, a selected next normal outcome, and diagnostic reel positioning.
 - No additional password/approval guard; still reject busy, fault and conflicting
   operations. Native sensors, accounting and recovery are not bypassed.
-- Programmer: T48. The user reports spare “Main W/PRINTER” chips detected as
+- Programmer: XGecu T48. The owner reports spare “Main W/PRINTER” chips detected as
   Winbond W27C02, ID DA85. These require 256 KiB lane images, not the original
   512 KiB mirrored packaging. Exact markings/speed, backups and physical
   program/readback remain qualification gates; see `PROGRAMMING.md`.
@@ -63,12 +72,18 @@ be validated independently of the codec's field widths.
 
 Private long poll `0xE0` in this pinned ROM, variable-length request. It is not a
 standard SAS feature and must not be added to the stock command catalogue. Require
-capability discovery before mutations. SAS framing/CRC/serial transport are reused.
+capability discovery before mutations. SAS framing/CRC/serial transport are reused:
+on the wire each message is the SAS address byte, `0xE0`, the data below and the
+SAS CRC.
 
 Request data after command: `[length:u8][S6RE:4][version:u8=1][op:u8][id:u64le][payload]`.
 `length` counts everything after itself (14 + payload length); maximum payload 64.
 Reply data after command: `[length:u8][S6RE:4][version:u8=1][op:u8][status:u8][id:u64le][payload]`.
-Maximum reply payload 64. A transport ACK is not operation completion.
+`length` is 15 + payload length; maximum reply payload 64. The reply repeats the
+request's op and ID. Only OK replies to INFO, STATUS and READ_PROFILE carry a
+payload; every other reply, including a mutation's, has an empty payload. The host
+requires the exact payload length for the op. A transport ACK is not operation
+completion.
 
 All mutation IDs are monotonically increasing nonzero integers, allocated from
 read-back of the machine's durable last ID. Query ID is zero. An identical repeat
@@ -82,17 +97,29 @@ Operations:
 | Code | Name | Request payload |
 |---|---|---|
 | 0 | INFO | empty; capabilities and limits, next mutation ID |
-| 1 | STATUS | empty; last operation ID/state, active profile generation/hash |
-| 2 | READ_PROFILE | offset:u16le, count:u8 (at most 64) |
+| 1 | STATUS | empty; last operation ID/state, active profile generation/CRC32 |
+| 2 | READ_PROFILE | offset:u16le, count:u8 (1 to 64, within the 252-byte active profile) |
 | 16 | BEGIN_PROFILE | total_length:u16le=252, CRC32:u32le |
 | 17 | PROFILE_CHUNK | offset:u16le, bytes (at most 62) |
 | 18 | COMMIT_PROFILE | empty; require complete valid upload and idle machine |
 | 19 | RESTORE_STOCK | empty; idle-only restoration when custom, no native change when already stock |
 | 32 | ARM_OUTCOME | three zero-based stop bytes |
 | 33 | CANCEL_OUTCOME | empty; cannot cancel a committed game |
-| 34 | BET_SPIN | bet_per_line:u8; optional three stop bytes |
+| 34 | BET_SPIN | bet_per_line:u8 (1 to the active profile's maximum bet per line; 3 in stock mode); optional three stop bytes |
 | 35 | POSITION | three zero-based stop bytes (diagnostic operation) |
-| 36 | JOG | reel:u8 |
+| 36 | JOG | reel:u8 (0 to 2) |
+
+Stop bytes are 0 to 21. Operations 16 to 19 need capability PROFILE (`0x01`), 32 and
+33 OUTCOME (`0x02`), 34 SPIN (`0x04`), 35 POSITION (`0x08`) and 36 JOG (`0x10`);
+an operation whose capability INFO does not advertise is answered UNSUPPORTED.
+
+The INFO reply payload is 23 bytes, little-endian: capabilities:u32,
+next_id:u64 (zero when mutations are prohibited), profile_size:u16, max_chunk:u8,
+max_lines:u8, max_bet_per_line:u8, max_total_bet:u8, stops:u8, max_award:u32.
+The STATUS reply payload is 20 bytes, little-endian: last_id:u64, last_op:u8,
+last_status:u8, active:u8 (nonzero when a custom profile is active), generation:u32,
+profile_crc:u32, fault:u8. (`src/core.c:fw_process`, `../tools/sas_extension.py`
+`INFO` and `STATUS`.)
 
 Statuses: OK=0, ACCEPTED=1, BAD_REQUEST=2, BAD_VERSION=3, BAD_ID=4,
 BUSY=5, FAULT=6, INVALID_PROFILE=7, INCOMPLETE=8, INTERRUPTED=9,

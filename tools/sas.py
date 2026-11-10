@@ -41,7 +41,7 @@ Stops and reels are zero-based. ACCEPTED means taken on, not finished: see exten
   sas.py --id N game-spin 1            repeat request N unchanged: the machine answers with
                                        its recorded state instead of acting again
 
-The Mac wrapper separately provides pre-boot commissioning (not normal SAS):
+The tools/sas wrapper separately provides pre-boot commissioning (not normal SAS):
   tools/sas commission-info
   tools/sas commission-capture ORIGINAL.json
   tools/sas commission-initialize ORIGINAL.json --first-install

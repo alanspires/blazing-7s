@@ -17,6 +17,6 @@ The MPU's J3 header (DUART1 channel B) and its Bally Secondary Game (BSG) framin
 
 ## Gotchas
 
-- On our machine DS1 SW4–SW6 are all ON, so neither the BSG nor the SED receiver is selected: J3 carries the generic progressive-style `0x01`-framed protocol, not BSG. A BSG frame sent to this machine as configured will not be answered. Use SAS on J10 for general access (`.rules/sas-host.md`).
+- On this machine DS1 SW4–SW6 are all ON, so neither the BSG nor the SED receiver is selected: J3 carries the generic progressive-style `0x01`-framed protocol, not BSG. A BSG frame sent to this machine as configured will not be answered. Use SAS on J10 for general access (`.rules/sas-host.md`).
 - J3 is 9600 8N1 at RS-232 levels on this board (U70 is a MAX1406); the IDC10-to-DB9 ribbon makes it a DTE, so a PC needs a null modem.
 - Link-layer timing and the queued application frames are inferred from code, not seen on a wire. Keep the note's **verified** / **inferred** markers accurate when adding findings.

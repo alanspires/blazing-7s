@@ -2,16 +2,24 @@
 
 ## Scope and current state
 
-This records the first live tests of the guarded extension on the user's ProSlot
-6000. It does not replace the scoped software proofs or establish full electrical,
-mechanical, fault-recovery or installation qualification. `install_ready` remains
-`false`.
+This is the dated record of the first live tests of the guarded firmware extension
+(`firmware/README.md`) on the owner's ProSlot 6000, for readers who want to know what
+the experimental image actually did on the real machine. It does not replace the
+scoped software proofs and does not establish full electrical, mechanical,
+fault-recovery or installation qualification. `install_ready` remains `false`.
 
-The user reported installing the verified Winbond spare U28/U43 pair and a normal
-idle display; they were instructed to preserve the original chips. Each test spin
-and the profile upload/restart/restore sequence had separate approval. The assistant
-sent no SafeRAM-clear, commissioning-initialization or credit-transfer command,
-replayed no mutation and performed no firmware reflash during these tests.
+The owner installed the verified Winbond spare U28/U43 pair and reported a normal
+idle display; the owner was instructed to preserve the original chips. Each test spin and the profile
+upload/restart/restore sequence had its own approval. No SafeRAM-clear,
+commissioning-initialization or credit-transfer command was sent, no mutation was
+replayed and no firmware was reflashed during these tests.
+
+**Run ids.** Ids such as `j83` name individual host-tool runs. Each one labels the
+captured output stored under that id in
+[`firmware-bringup-evidence.json`](firmware-bringup-evidence.json) (`j83`–`j101`),
+[`firmware-cli-acceptance-evidence.json`](firmware-cli-acceptance-evidence.json)
+(`j108`–`j113`) or, for the two timing traces, the replay fixture
+`tools/fixtures/s6000_profile_reply_timing.json` (`j103`, `j104`).
 
 Last observed state, evidence run `j113`:
 
@@ -21,7 +29,7 @@ Last observed state, evidence run `j113`:
 - Coin in 550, coin out 1565, drop 1015, jackpot 6000.
 - Games played 185, games won 26, door openings 17, power resets 12.
 
-The corrected production CLI now passes a live upload/readback/restore sequence,
+The corrected production CLI passes a live upload/readback/restore sequence,
 without diagnostic overrides or mutation replay. Both normal commands received
 valid replies; credits and all eight native meters stayed unchanged. See
 **Normal CLI acceptance after timeout correction** below. Further checks require
@@ -36,18 +44,18 @@ Main SHA-256:
 Winbond-packaging manifest SHA-256:
 `ef1728ca2cb342666e6b31ebee1be8fdc411322b36f7c509c67dfb296b5f7b01`.
 
-[Programming record](../firmware/PROGRAMMING.md) identifies the exact chip images.
-Full lane readbacks were checked before installation. This report does not infer
+The [programming record](../firmware/PROGRAMMING.md) identifies the exact chip images.
+Full lane readbacks were checked before installation. This record does not infer
 installed byte identity solely from a SAS signature or extension version.
 
-[Captured evidence](firmware-bringup-evidence.json) preserves the exact job outputs
-for `j83` through `j101`. Each run includes its original log file name. These are
-semantic host results, not raw serial timing traces. Missing replies alone do not
-identify their cause.
+The [captured evidence](firmware-bringup-evidence.json) preserves the exact outputs
+of runs `j83` through `j101`. Each run records its log file name (with the local
+directory replaced by a placeholder). These are semantic host results, not raw serial
+timing traces. Missing replies alone do not identify their cause.
 
 ## Baseline and first boot
 
-`j83`, with original ROMs still installed:
+`j83`, with the original ROMs still installed:
 
 | Meter | Value |
 | --- | ---: |
@@ -63,7 +71,7 @@ identify their cause.
 
 This snapshot is not a whole-SRAM backup.
 
-After the user installed the new pair and powered on, raw commissioning INFO did
+After the owner installed the new pair and powered on, raw commissioning INFO did
 not answer (`j84`). Normal SAS did answer (`j85`), followed by the new E0 INFO and
 STATUS (`j86`). Credits and financial/game meters were unchanged; door openings
 and power resets each increased by one.
@@ -74,7 +82,7 @@ total credits, and maximum award 1500. Advertised capabilities were profile,
 outcome and spin (`0x00000007`), not standalone positioning or jogging.
 
 No commissioning INIT was sent. `firmware/src/commission.c:commission_boot` can
-continue normal startup when the core accepts the stored state; a first install
+continue normal startup when the core accepts the stored state, so a first install
 is not guaranteed to stop in the raw service. The live observation establishes
 normal runtime, not successful commissioning-service qualification or the exact
 pre-boot RAM contents.
@@ -92,8 +100,8 @@ Observed accounting: credits 1014 to 1013; coin in 548 to 549; games played 183 
 184; coin out and games won unchanged. Reported zero-based stops were 11, 6, 7.
 This establishes one completed losing stock game through telemetry.
 
-INFO reported next ID 2 (`j90`). Following a user-controlled power cycle, `j91`
-retained the completed request, next ID, stock mode and all financial/game state.
+INFO reported next ID 2 (`j90`). After a power cycle by the owner, `j91` showed the
+completed request, next ID, stock mode and all financial/game state retained.
 Door and reset counters increased by one. This is an idle-restart retention check,
 not an interrupted-write or electrical power-fail test.
 
@@ -103,11 +111,11 @@ Offline analysis of the hash-pinned personality predicted a two-credit ordinary
 award for a one-credit center-line wager at zero-based stops 0, 0, 0: symbols
 24/24/24, paytable record 10, flags zero. No progressive award was requested.
 
-The user approved exactly one such spin. Request ID 2 was sent once (`j92`) and
-completed `OK`, not pending and without an extension fault (`j93`). Actual reported
+The owner approved exactly one such spin. Request ID 2 was sent once (`j92`) and
+completed `OK`, not pending and without an extension fault (`j93`). The reported
 stops matched 0, 0, 0. Credits became 1014; coin in became 550; coin out became 1565;
-games played became 185 and games won became 26. Thus the one-credit wager and
-two-credit award reconciled exactly.
+games played became 185 and games won became 26. The one-credit wager and
+two-credit award therefore reconciled exactly.
 
 The initial balance was restored by the ordinary award, not by a refund or rollback.
 Both games remain in lifetime accounting. No other award class is qualified by this
@@ -127,19 +135,19 @@ phase.
 - JSON SHA-256:
   `f48fe7b84a6cd54eadb2fa4d44ead96115dc779b3fa50bb87331ade691a9c8f0`.
 
-Preflight `j94` confirmed stock generation 1, next ID 3, no fault/pending operation
-and 1014 credits. Upload used BEGIN ID 3, chunk IDs 4–8 and COMMIT ID 9. The COMMIT
+Preflight `j94` confirmed stock generation 1, next ID 3, no fault or pending operation
+and 1014 credits. The upload used BEGIN ID 3, chunk IDs 4–8 and COMMIT ID 9. The COMMIT
 reply was missing (`j95`); the client correctly stopped with `UncertainOutcome`
 and did not retransmit.
 
-Read-only reconciliation `j96` found COMMIT ID 9 `OK`, active custom profile,
-generation 2, expected CRC, no fault or pending operation, and unchanged credits.
-`j97` downloaded the actual active profile, validated its framing/format/CRC and
+Read-only reconciliation `j96` found COMMIT ID 9 `OK`, an active custom profile,
+generation 2, the expected CRC, no fault or pending operation, and unchanged credits.
+`j97` downloaded the actual active profile, validated its framing, format and CRC, and
 compared all encoded bytes with the staged profile. It matched exactly.
 
-After a user-controlled power cycle, `j98` retained ID 9, next ID 10, generation 2,
-CRC and financial/game counters. `j99` downloaded the live profile again and
-verified exact equality with both the staged bytes and pre-restart readback.
+After a power cycle by the owner, `j98` showed ID 9, next ID 10, generation 2, the
+CRC and the financial/game counters retained. `j99` downloaded the live profile again
+and verified exact equality with both the staged bytes and the pre-restart readback.
 This qualifies persistence for this stock-equivalent profile over this idle restart;
 no custom-profile gameplay or changed odds/paylines were exercised.
 
@@ -152,7 +160,7 @@ fault, and unchanged financial/game counters and credits.
 
 Both state changes were verified, but neither initial profile-changing CLI call
 completed normally end-to-end. Read-only reconciliation alone did not establish
-the cause. The later separately approved probe below supplies timing evidence.
+the cause. The later, separately approved probe below supplies timing evidence.
 
 Host evidence: `tools/sas_protocol.py:Host.RESPONSE_TIMEOUT` allows 0.25 seconds for
 the first reply byte. `tools/sas.py:SerialLine.read_message` waits for that first
@@ -164,27 +172,27 @@ captured no raw timing trace.
 
 ## Measured profile reply latency
 
-The user separately approved one stock-equivalent upload followed by restore,
-without spins or transfers. Diagnostic staging `j102` verified all nine pinned
-host/profile files and opened no serial port. The single-threaded probe retained
-the production serial receive/framing loop, recorded its real `os.read` chunks,
-used a two-second first-byte observation window and disabled retransmission for
-every command. Its source is preserved as
+The owner separately approved one stock-equivalent upload followed by a restore,
+without spins or transfers. A diagnostic staging run verified all nine pinned
+host/profile files and opened no serial port. The single-threaded probe kept the
+production serial receive/framing loop, recorded its real `os.read` chunks, used a
+two-second first-byte observation window and disabled retransmission for every
+command. Its source is preserved as
 [historical probe text](firmware-reply-probe-source.txt), not a maintained CLI.
 It uses the pre-fix host adapter interface and is not intended for direct reuse.
 
-Full, unchanged JSON-lines outputs are preserved locally:
+The full, unchanged JSON-lines outputs are in this directory:
 
 - `j103`: [upload trace](firmware-reply-probe-upload.jsonl), SHA-256
   `8703f9597220bc15508a5cb8a804f9c4dce7a10de4a1605c0292ece382efcd0b`.
 - `j104`: [restore trace](firmware-reply-probe-restore.jsonl), SHA-256
   `f7c5006cef3a17813325c9f4368e774d46fc5f68dc452f8a70bb80d4e537f9a5`.
-- Probe source SHA-256, also printed by `j102`:
+- Probe source SHA-256, also printed by the staging run:
   `d1577222397928a6bbb0d605ec6bfc88f85b051fffe6a455686fa05d1a0460a2`.
 
-Upload used BEGIN ID 11, chunks 12–16 and COMMIT ID 17. Restore used ID 18.
+The upload used BEGIN ID 11, chunks 12–16 and COMMIT ID 17; the restore used ID 18.
 Each mutation was sent once. Both operations returned matching, CRC-valid,
-20-byte `OK` replies; upload also verified all 252 profile bytes.
+20-byte `OK` replies; the upload also verified all 252 profile bytes.
 
 | Operation | Request ID | First bytes after receive wait began | Last chunk |
 | --- | ---: | ---: | ---: |
@@ -197,7 +205,7 @@ reproduces the deadline mismatch while successfully receiving each late reply;
 no firmware change or request replay was needed. It does not prove an exact
 internal firmware execution duration.
 
-The probe finished in stock generation 5, next ID 19, no fault/pending action,
+The probe finished in stock generation 5, next ID 19, no fault or pending action,
 1014 credits and unchanged financial/game counters. The host-only correction
 keeps the ordinary SAS default and selects a named, per-call two-second first-byte
 budget only for COMMIT_PROFILE and RESTORE_STOCK. Mutations still do not retry;
@@ -207,79 +215,78 @@ separately below.
 
 ### Host-only verification
 
-The focused review approved the timeout policy, single-send failure semantics and
-all 17 fixture exchanges against the raw traces. The captured exchange replay
+An independent review approved the timeout policy, the single-send failure semantics
+and all 17 fixture exchanges against the raw traces. The captured exchange replay
 fails with `NoResponse` at COMMIT/RESTORE when the per-operation policy is removed,
 and succeeds with it; deliberately shorter waits remain uncertain after one send.
 No test depends on wall-clock duration.
 
 - Affected host/CPU run: 94 tests and 385 subtests passed, including both compiled
   host-to-firmware integrations.
-- Final documented host-only command: 131 unittest tests passed; the separate
-  pytest commissioning-wrapper selection passed three tests. The initial expanded
-  command incorrectly included the pytest-only wrapper in unittest; the runner
-  instructions were corrected, not the tests skipped.
-- Ruff on touched host files (including the shared fake), shell syntax and diff
+- Documented host-only command: 131 unittest tests passed; the separate pytest
+  selection of commissioning-wrapper tests passed three tests. The wrapper tests
+  are pytest-only and are not part of the unittest command.
+- Ruff on the touched host files (including the shared fake), shell syntax and diff
   whitespace checks passed. All 20 firmware inputs and eight published artifacts,
-  exact chip lanes, boot checksum and unchanged original ROMs were reverified.
+  the exact chip lanes, boot checksum and unchanged original ROMs were reverified.
 
 These offline checks preceded the normal-CLI live acceptance below. Runtime
 firmware and chip images were not changed.
 
 ## Normal CLI acceptance after timeout correction
 
-The user approved further checks. The first bounded step used the committed
+The owner approved further checks. The first bounded step used the committed
 production `tools/sas` wrapper and ordinary CLI, without the historical diagnostic
 probe or a global timeout override. The profile was again stock-equivalent; no
 spins, transfers, initialization, reflash, power interruption or fault injection
 were performed.
 
-[Acceptance evidence](firmware-cli-acceptance-evidence.json) preserves all 17 saved
-JSON files and six exact job logs (`j108`–`j113`). These are semantic CLI results,
-not a new serial timing capture. The tested host source is a commit in private
-development history that is not in the public repository; the evidence records it as
-`<private-commit>`, with the serial endpoint and job-log paths likewise replaced by
-placeholders.
+The [acceptance evidence](firmware-cli-acceptance-evidence.json) preserves all 17
+saved JSON files and six exact run logs (`j108`–`j113`). These are semantic CLI
+results, not a new serial timing capture. The tested host source is a commit in
+private development history that is not in the public repository; the evidence
+records it as `<private-commit>`, with the serial endpoint and run-log paths likewise
+replaced by placeholders.
 
 - `j108` confirmed the prior stock generation 5 / ID 18 / next ID 19 baseline,
   1014 credits and unchanged meters before any profile mutation. The locally
   generated profile matched the earlier encoded SHA-256 and CRC.
 - `j109` stopped before invoking upload: the source-set check found one extra
-  remote `tools/sas_meters.py`. Every current source file matched. The extra file
-  exactly matched an obsolete module deleted earlier in private development history;
-  no current tool imported it. `j110` removed only that hash-verified obsolete source, without
-  opening serial. `j111` then verified all 11 current remote files, the 250 ms
-  ordinary default and the two 2 s per-operation budgets. This was deployment
-  residue, not a failed machine command or a timeout-fix defect.
+  remote file, `tools/sas_meters.py`. Every current source file matched. The extra
+  file exactly matched an obsolete module deleted earlier in private development
+  history; no current tool imported it. `j110` removed only that hash-verified
+  obsolete file, without opening serial. `j111` then verified all 11 current remote
+  files, the 250 ms ordinary default and the two 2 s per-operation budgets. This was
+  deployment residue, not a failed machine command or a defect in the timeout fix.
 - `j112` invoked normal `profile-upload` once. It completed normally with COMMIT
   ID 25 `OK`, generation 6 and CRC `58E5D120`. A separate normal `profile-download`
   matched all 252 encoded bytes and SHA-256
   `c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477`.
   INFO/STATUS, credits and all eight native meters were checked afterward.
 - `j113` invoked normal `profile-restore` once. It completed normally with ID 26
-  `OK`, stock generation 7, no fault/pending action and next ID 27. Credits
+  `OK`, stock generation 7, no fault or pending action and next ID 27. Credits
   remained 1014; all eight native meters exactly matched the preflight snapshot.
 
 This closes the reproduced profile-reply deadline defect for the observed normal
 CLI round-trip. It is not a universal two-second timing guarantee, a long-duration
-stress test or qualification of changed profiles/gameplay. No firmware or chip
+stress test or qualification of changed profiles or gameplay. No firmware or chip
 change was needed.
 
 ## Remaining scope
 
 The limited live checks above do not establish SRAM write atomicity, power-fail
-write inhibition/timing, long-duration retention, all native game paths,
+write inhibition or timing, long-duration retention, all native game paths,
 progressive/handpay behavior, standalone reel diagnostics, or physical fatal-halt
-and recovery behavior. See [provisioning](../firmware/PROVISIONING.md) and
+and recovery behavior. See [provisioning](../firmware/PROVISIONING.md) and the
 [settlement guard](../firmware/SETTLEMENT-GUARD.md) for the original premises.
 The offline-era statements in those documents predate this live record; they are
 not evidence that these later tests were never performed.
 
-Offline and bounded live host-policy verification are complete. The user reports
-that measurement equipment is unavailable and requests proceeding without it.
-Instrumented electrical/timing checks therefore remain unverified, not passed.
-Use the limited serial-functional evidence above without claiming full hardware
-qualification: `install_ready` remains `false`, and standalone reel positioning
-and jogging remain disabled. No live probing, power interruption, fault injection
-or further game/money action is underway; no reflash is required for the host-only
-correction.
+Offline and bounded live host-policy verification are complete. The owner has no
+measurement equipment for the instrumented checks and chose to proceed without it,
+so electrical and timing checks remain unverified, not passed. Use the limited
+serial-functional evidence above without claiming full hardware qualification:
+`install_ready` remains `false`, and standalone reel positioning and jogging remain
+disabled. As of this record, no live probing, power interruption, fault injection
+or further game or money action was underway, and the host-only correction needs no
+reflash.

@@ -1,5 +1,12 @@
 # Component references
 
+Manufacturer datasheets for two chips the firmware work depends on: the VIA (versatile
+interface adapter, the MPU board's timer and parallel I/O chip), whose timer and
+interrupt behavior the interrupt audit relies on, and the 27C4001 EPROM family of the
+original main-program chips. Each entry gives the document's source, its SHA-256 and
+the sections used. Both are third-party documents, not covered by this repository's
+license.
+
 ## CMD G65SC22
 
 `g65sc22-cmd.pdf`: California Micro Devices G65SC22 manufacturer datasheet,
@@ -16,9 +23,9 @@ body text is scanned and is absent from ordinary PDF text extraction.
 
 U41 is marked **CMD G65SC22PI-2**, with `0304` below it (observed on 2026-10-17, from
 photographs that are not distributed; both VIAs in `../../photos/05-mpu-eproms.jpg`
-carry this marking). This identifies a matching manufacturer reference, replacing
-reliance on a compatible WDC-family description. Neither the marking nor the
-datasheet qualifies actual clock/bus timing, silicon condition or
+carry this marking). The marking makes this CMD datasheet the matching manufacturer
+reference, rather than a description of a compatible WDC-family part. Neither the
+marking nor the datasheet qualifies actual clock/bus timing, silicon condition or
 board behavior; see `../../firmware/IRQ-AUDIT.md`.
 
 ## ST M27C4001

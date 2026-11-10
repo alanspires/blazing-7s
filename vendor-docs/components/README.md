@@ -26,7 +26,7 @@ photographs that are not distributed; both VIAs in `../../photos/05-mpu-eproms.j
 carry this marking). The marking makes this CMD datasheet the matching manufacturer
 reference, rather than a description of a compatible WDC-family part. Neither the
 marking nor the datasheet qualifies actual clock/bus timing, silicon condition or
-board behavior; see `../../firmware/IRQ-AUDIT.md`.
+board behavior; see `../../firmware/audits/IRQ-AUDIT.md`.
 
 ## ST M27C4001
 

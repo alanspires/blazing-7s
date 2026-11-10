@@ -19,7 +19,7 @@ paths:
   - "tools/fixtures/s6000_rom_signatures.json"
   - "tools/fixtures/s6000_money_*"
   - "tools/fixtures/s6000_write_test*"
-  - "docs/sas/**"
+  - "vendor-docs/sas/**"
   - "notes/sas-j10.md"
 ---
 
@@ -72,7 +72,7 @@ paths:
 - The stock command set and fixed request lengths must match the main ROM's
   `sas_rx_byte` table, as checked by `TableTest`. Do not add private firmware commands
   to this registry. Layout provenance is SAS 6.02 or, for removed EFT commands,
-  `docs/sas/sastest-simulator-2021/sastest.ini`; a layout is not proof of live support.
+  `vendor-docs/sas/sastest-simulator-2021/sastest.ini`; a layout is not proof of live support.
 - `Command.read` is a safety allowlist of exact arguments, not a synonym for type R.
   `dump` must use only those values. Replies to `pending-cashout`, `ticket-data` and
   `sas-progressive-win` can start exchanges or consume queued state; keep them excluded.

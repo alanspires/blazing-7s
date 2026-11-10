@@ -17,7 +17,7 @@ exceptions, and the offline gates the published image passed.
 independently reviewed. **Hardware and installation remain unqualified**; nothing
 here authorizes programming chips or operating the machine. The extension is
 experimental firmware for one privately owned machine used for entertainment,
-not for regulated or commercial machines ([README.md](README.md)).
+not for regulated or commercial machines ([README.md](../README.md)).
 
 This is one of five audit records that together qualify the extension's stacks:
 
@@ -127,7 +127,7 @@ and no assumption of finite financial progress is needed.
 The published image is the exact reviewed build in `build/`: `main.bin` SHA-256
 `06bef89137d206e8113bbe096a06d30dcb45e960f764d9350b777033b83e7197`,
 with `install_ready=false`. The build directory is not committed; a fresh build
-must reproduce that hash ([GETTING-STARTED.md](../GETTING-STARTED.md), **Check
+must reproduce that hash ([GETTING-STARTED.md](../../GETTING-STARTED.md), **Check
 the build**). Historical b2 is kept only as proof provenance; NATIVE-STACK-LEDGERS.md, **Inputs and conventions**, pins its ELF,
 disassembly and manifest hashes. The original ROM
 `roms/s6000_main_S6M00002B5.bin` has SHA-256

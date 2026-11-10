@@ -7,7 +7,7 @@ Reverse engineering of one Bally ProSlot 6000 "Blazing 7s" machine that the user
 - `roms/*.bin` are the original dumps, merged for the 16-bit bus: the even chip (U28 / U20) supplies the high byte at even addresses. Never modify them; tools, tests and the firmware build read them as inputs and test oracles, and the main program and installed personality images are hash-pinned (`firmware/build.py`, `tools/sas_profile.py`).
 - The machine runs main program S6M00002B5 with personality **E595211X-05**, despite its "SMI7156" sticker; the SAS ROM signature confirmed the pairing (`roms/README.md`). Addresses in notes, code and tests are CPU addresses in that main program's map unless stated otherwise.
 - Prefer checking a claim against the ROM bytes (ideally in a test that reads `roms/`) over restating a number. Function names cited in notes and code are the ones set in the Ghidra project (`.rules/ghidra.md`).
-- `docs/` holds vendor manuals, vendor software and the IGT SAS 6.02 specification; they and `roms/` are third-party works, not covered by the MIT `LICENSE`. Code cites spec sections or tables for every layout; keep those citations when changing a layout.
+- `vendor-docs/` holds vendor manuals, vendor software and the IGT SAS 6.02 specification; they and `roms/` are third-party works, not covered by the MIT `LICENSE`. Code cites spec sections or tables for every layout; keep those citations when changing a layout.
 - `notes/` are the findings records. Mark each finding **verified** (checked against ROM bytes, schematic, the live machine, or dated photographs of it) or **inferred** (read from code, not observed), and date live-machine records. Photographs that are not in `photos/` are cited as dated, undistributed observations; cite a `photos/` file only where it shows the item.
 
 ## Live machine
@@ -46,4 +46,5 @@ Privacy wins over detail: when a note, fixture, test or photo would carry a pers
   ```
 
 - Firmware and every pytest-based tools test run with `firmware/.venv/bin/python -m pytest ...` from the repository root (the full suite: `firmware/.venv/bin/python -m pytest firmware/tests tools`): there are no `__init__.py` files, and `python -m` puts the root on `sys.path` so `firmware.*` and `tools.*` imports resolve. Setup and per-slice commands are in `.rules/firmware.md`; the dev container runs the same commands (`GETTING-STARTED.md`).
+- CI (`.github/workflows/ci.yml`) runs the full suite, the build-hash check against `firmware/README.md` and `privacy_check.py tree --no-private-literals` in the dev container image, and the stdlib suites above on Python 3.9; keep it green, and update it when these commands change.
 - Run `ruff check` on Python you touch; there is no committed ruff configuration, so defaults apply.

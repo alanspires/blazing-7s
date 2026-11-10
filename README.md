@@ -1,5 +1,7 @@
 # Blazing 7s
 
+[![CI](https://github.com/alanspires/blazing-7s/actions/workflows/ci.yml/badge.svg)](https://github.com/alanspires/blazing-7s/actions/workflows/ci.yml)
+
 Anyone that has seen *Ocean's 11* has always wanted to play with a Vegas slot machine.
 Well... boredom and AI have finally made this possible.
 
@@ -37,8 +39,8 @@ More photos: [the door open](photos/02-door-open.jpg),
 The payout and outcome features are for a privately owned machine used for
 entertainment, not for use on regulated or commercial gaming machines.
 
-`docs/` and `roms/` are third-party works owned by their publishers (Bally, IGT,
-Mikohn, JCM and the others named in `docs/README.md`), included for reference and not
+`vendor-docs/` and `roms/` are third-party works owned by their publishers (Bally, IGT,
+Mikohn, JCM and the others named in `vendor-docs/README.md`), included for reference and not
 covered by this repository's license; the Ghidra database contains disassembly of
 vendor code. The author's own code and notes are MIT-licensed: see [LICENSE](LICENSE).
 
@@ -86,9 +88,8 @@ To run the tests, build the firmware or connect to your own machine, see
   game profiles: wager cap, paylines, payouts and stop weights, with a reproduced
   nominal return calculation for the original game.
 - `notes/firmware-bringup.md` the limited live bring-up of the firmware extension,
-  with its captured evidence in `notes/firmware-bringup-evidence.json`,
-  `notes/firmware-cli-acceptance-evidence.json` and the `notes/firmware-reply-probe-*`
-  files.
+  with its captured evidence in `notes/evidence/` (`firmware-bringup-evidence.json`,
+  `firmware-cli-acceptance-evidence.json` and the `firmware-reply-probe-*` files).
 
 ### Firmware
 
@@ -101,10 +102,10 @@ To run the tests, build the firmware or connect to your own machine, see
 - `firmware/PROVISIONING.md` and `firmware/COMMISSIONING-CONTRACT.md` the pre-boot
   first-install commissioning service.
 - Audit records of the original firmware and the extension's resource bounds:
-  `firmware/IRQ-AUDIT.md` (interrupts and profile publication),
-  `firmware/TASK-STACK-AUDIT.md` and `firmware/NATIVE-STACK-LEDGERS.md` (stack
-  usage), `firmware/INITIAL-ROOTS.md` (the initial and bootstrap stack roots) and
-  `firmware/SETTLEMENT-GUARD.md` (the settlement entry guard).
+  `firmware/audits/IRQ-AUDIT.md` (interrupts and profile publication),
+  `firmware/audits/TASK-STACK-AUDIT.md` and `firmware/audits/NATIVE-STACK-LEDGERS.md` (stack
+  usage), `firmware/audits/INITIAL-ROOTS.md` (the initial and bootstrap stack roots) and
+  `firmware/audits/SETTLEMENT-GUARD.md` (the settlement entry guard).
 - `firmware/src/`, `firmware/patches.json`, `firmware/link.ld` and `firmware/build.py`
   the extension's source, patch specification, linker script and builder;
   `firmware/tests/` its tests.
@@ -147,8 +148,8 @@ To run the tests, build the firmware or connect to your own machine, see
 
 - `photos/` seven photos of the machine (JPEG, 1600 px on the long side, metadata
   stripped, identifier labels pixelated).
-- `docs/` vendor manuals, the IGT SAS 6.02 specification and vendor software
-  (`docs/README.md`).
+- `vendor-docs/` vendor manuals, the IGT SAS 6.02 specification and vendor software
+  (`vendor-docs/README.md`).
 - `roms/` merged program images (68000 big-endian, even chip = high byte):
   `roms/s6000_main_S6M00002B5.bin` (U28 + U43 "LEAVE-IN MAIN"),
   `roms/personality_E595211X-05.bin` (U20 + U18, the installed game),

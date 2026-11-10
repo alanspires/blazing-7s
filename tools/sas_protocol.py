@@ -1,6 +1,6 @@
 """SAS host side for the S6000's J10 SAS port, independent of the serial hardware.
 
-Everything here follows the IGT SAS 6.02 spec in docs/sas/ (section numbers cited inline).
+Everything here follows the IGT SAS 6.02 spec in vendor-docs/sas/ (section numbers cited inline).
 The serial line is injected (see `Line`), so the protocol logic runs without a machine.
 What each long poll carries is in `sas_commands`.
 """

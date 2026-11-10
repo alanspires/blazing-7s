@@ -17,7 +17,7 @@ reviewed artifacts are pinned and published locally. **Physical and installation
 gates remain pending**; local publication does not authorize programming chips or
 operating the machine. The extension is experimental firmware for one privately
 owned machine used for entertainment, not for regulated or commercial machines
-([README.md](README.md)).
+([README.md](../README.md)).
 
 This record summarizes and owns the capacity and gate status; the proofs it relies
 on live in the other audit records, listed under **Authoritative proof

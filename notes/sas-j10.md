@@ -12,7 +12,7 @@ It is for anyone who wants to reproduce the connection or check the findings.
 - **SAS** (Slot Accounting System) is IGT's protocol between a gaming machine and a
   casino host: meters, game configuration, event reporting, enable/disable, credit
   transfers, tickets and ROM signatures. The specification is
-  `docs/sas/IGT-SAS-6.02-protocol-specification.pdf`; section (§) and table numbers
+  `vendor-docs/sas/IGT-SAS-6.02-protocol-specification.pdf`; section (§) and table numbers
   below refer to it. The machine itself reports SAS 6.01.
 - The host addresses one machine at a time with a **long poll**: an address byte and a
   one-byte command code (written here in hex, for example `1C`). A type R long poll is
@@ -33,7 +33,7 @@ It is for anyone who wants to reproduce the connection or check the findings.
 - **Meters** are the machine's lifetime accounting counters. **SafeRAM** is the
   battery-backed RAM at `0x438000`–`0x43FFFF` that survives power-off; **work RAM** is
   cleared at power-up. **Options** are the numbered settings of the machine's setup
-  menus (setup manual `docs/bally-s6000/MK2-S6MOD-0013_setup-and-operation.pdf`).
+  menus (setup manual `vendor-docs/bally-s6000/MK2-S6MOD-0013_setup-and-operation.pdf`).
 - The **SAS host** in this note is the Linux computer next to the machine that owns the
   USB serial adapter. `tools/sas.py` is our SAS host program; `tools/sas` runs it on
   the SAS host from another computer (**SAS host setup**, below).
@@ -101,7 +101,7 @@ can collide, and changing its seed does not provide an independent integrity che
 
 | J10 pin | Signal | Wire (TITO@Home housing) | Source |
 |---|---|---|---|
-| 1 | GND | black | schematic p.14-8, `docs/bally-s6000/tito-harness-j10-pinout.pdf` |
+| 1 | GND | black | schematic p.14-8, `vendor-docs/bally-s6000/tito-harness-j10-pinout.pdf` |
 | 3 | TXD4, machine transmits | orange | schematic p.14-8; chirps seen on it |
 | 5 | RXD4, machine receives | purple | schematic p.14-8; polls on it are answered |
 | 13 | GND | black | harness pinout |
@@ -406,7 +406,7 @@ The captured live replies also exercise the command decoder and accounting check
 `tools/sas_commands.py` has every one of them with its request and reply layout, from
 SAS 6.02 (table cited per command) or, for the EFT polls 6.02 dropped (`1D`, `27`, `28`,
 `62`–`6B`), from the SASTest simulator's definitions
-(`docs/sas/sastest-simulator-2021/sastest.ini`). `tools/test_sas_commands.py` checks the
+(`vendor-docs/sas/sastest-simulator-2021/sastest.ini`). `tools/test_sas_commands.py` checks the
 list and every fixed request length against this ROM table. The EFT reply layouts are
 SASTest's and unconfirmed on the machine, except `1D`, `27`, `28` and `6A`, which
 answered.

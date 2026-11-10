@@ -15,7 +15,7 @@ paths:
   - "tools/test_sas_firmware.py"
   - "tools/fixtures/s6000_profile_reply_timing.json"
   - "notes/remote-game-config.md"
-  - "notes/firmware-reply-probe-*"
+  - "notes/evidence/firmware-reply-probe-*"
 ---
 # Firmware remote control
 

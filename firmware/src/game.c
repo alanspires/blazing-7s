@@ -796,7 +796,7 @@ static void publish(const uint8_t *profile, int selector_changed)
     platform_irq_restore(irq);
 }
 
-/* Runtime admission (firmware/IRQ-AUDIT.md, "Recommended bounded admission
+/* Runtime admission (firmware/audits/IRQ-AUDIT.md, "Recommended bounded admission
  * snapshot"): native motion retired normally and VIA timer 2 is neither pending
  * nor enabled. Under the audit's normal-lifecycle premise, IRQ6 then does not
  * route through stepping handler 0x5e654 while owned fields change; this does

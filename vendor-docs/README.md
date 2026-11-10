@@ -81,7 +81,7 @@ but covering the PSA-66-ST printer, JCM WBA and the accounting interface
   evidence and remaining checks are in `../firmware/PROGRAMMING.md`.
 - `components/g65sc22-cmd.pdf`: full CMD G65SC22 VIA datasheet matching the
   U41 model on the MPU (`../photos/05-mpu-eproms.jpg`); timer/interrupt analysis is
-  in `../firmware/IRQ-AUDIT.md`.
+  in `../firmware/audits/IRQ-AUDIT.md`.
 
 Provenance and hashes are in `components/README.md`.
 

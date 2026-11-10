@@ -31,11 +31,11 @@ extension commands. The original ROM files are never modified.
 | [`PROVISIONING.md`](PROVISIONING.md) | Why first installation needs a pre-boot commissioning service, what it archives and how it initializes storage safely. |
 | [`COMMISSIONING-CONTRACT.md`](COMMISSIONING-CONTRACT.md) | The commissioning service's exact memory map, boot hooks, request/reply payloads, framing and host archive rules. |
 | [`PROGRAMMING.md`](PROGRAMMING.md) | Which EPROMs the chip images are for, the verified image hashes, the spare-chip readback record and the bench procedure. |
-| [`TASK-STACK-AUDIT.md`](TASK-STACK-AUDIT.md) | Audit record: the enlarged native task stacks (allocation, free-list lifecycle, stack/SRAM separation) and the non-E0 stack qualification status. |
-| [`INITIAL-ROOTS.md`](INITIAL-ROOTS.md) | Audit record: the complete proof of initial stack peaks for every native and bootstrap entry path (roots and callback selectors). |
-| [`NATIVE-STACK-LEDGERS.md`](NATIVE-STACK-LEDGERS.md) | Audit record: instruction-level stack costs of the individual native and extension routines that the root proof composes. |
-| [`SETTLEMENT-GUARD.md`](SETTLEMENT-GUARD.md) | Audit record: the settlement entry guard, its admitted-settlement stack bound and the offline gates of the published image. |
-| [`IRQ-AUDIT.md`](IRQ-AUDIT.md) | Audit record: native interrupt and profile-publication behavior, E0 worker/interrupt stack ledgers, the serial drain and the hardware premises the proofs rely on. |
+| [`TASK-STACK-AUDIT.md`](audits/TASK-STACK-AUDIT.md) | Audit record: the enlarged native task stacks (allocation, free-list lifecycle, stack/SRAM separation) and the non-E0 stack qualification status. |
+| [`INITIAL-ROOTS.md`](audits/INITIAL-ROOTS.md) | Audit record: the complete proof of initial stack peaks for every native and bootstrap entry path (roots and callback selectors). |
+| [`NATIVE-STACK-LEDGERS.md`](audits/NATIVE-STACK-LEDGERS.md) | Audit record: instruction-level stack costs of the individual native and extension routines that the root proof composes. |
+| [`SETTLEMENT-GUARD.md`](audits/SETTLEMENT-GUARD.md) | Audit record: the settlement entry guard, its admitted-settlement stack bound and the offline gates of the published image. |
+| [`IRQ-AUDIT.md`](audits/IRQ-AUDIT.md) | Audit record: native interrupt and profile-publication behavior, E0 worker/interrupt stack ledgers, the serial drain and the hardware premises the proofs rely on. |
 | [`../notes/firmware-bringup.md`](../notes/firmware-bringup.md) | What happened when the image ran on the real machine. |
 
 ## What is implemented

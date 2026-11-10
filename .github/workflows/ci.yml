@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The full suite, the firmware build and the privacy check, inside the dev container
+  # image so CI uses the same pinned m68k toolchain and Python dependencies visitors get.
+  container:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build the dev container image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          tags: blazing-7s-dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Tests
+        run: ./.github/in-container.sh python -m pytest -p no:cacheprovider firmware/tests tools
+      - name: Firmware build matches the published image
+        run: |
+          ./.github/in-container.sh python firmware/build.py firmware/patches.json
+          expected=$(sed -n '/^Published image SHA-256:$/{n;s/[^0-9a-f]//g;p;}' firmware/README.md)
+          actual=$(sha256sum firmware/build/main.bin | cut -d' ' -f1)
+          echo "expected $expected"
+          echo "actual   $actual"
+          [ -n "$expected" ] && [ "$expected" = "$actual" ]
+      - name: Privacy check
+        run: ./.github/in-container.sh python tools/privacy_check.py tree --no-private-literals
+
+  # tools/sas.py runs on the SAS host's system python3, and the stdlib suites on macOS's
+  # python3 3.9; this job keeps the host tools working on that oldest supported version.
+  host-tools-python39:
+    runs-on: ubuntu-24.04
+    container: python:3.9-slim@sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b
+    steps:
+      - name: Install git (test_privacy_check builds throwaway repositories)
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Host-tool stdlib suites
+        working-directory: tools
+        run: >-
+          python3 -m unittest test_sas_protocol test_sas_commands test_sas_cli
+          test_sas_write_test test_sas_money_test test_bsg_frame test_sas_profile
+          test_sas_extension test_sas_commission test_privacy_check

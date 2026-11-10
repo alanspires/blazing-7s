@@ -36,7 +36,7 @@ Their SHA-256 hashes (the firmware build pins the main program's, and
 ## Which game is installed
 
 The installed chips' stickers read "E595211X-05 SMI7156". Bally's game lists in
-`docs/bally-s6000/` identify each game by an SMI number alongside its part number, and
+`vendor-docs/bally-s6000/` identify each game by an SMI number alongside its part number, and
 they disagree with that pairing:
 
 | SMI | Part number | Hit freq. | Max-coin % | Top award | Note |

@@ -1,7 +1,7 @@
 # Native interrupt and profile-publication audit
 
 This record audits the interrupt side of the original main program, S6M00002B5, as it
-affects the experimental firmware extension ([README.md](README.md)). It answers two
+affects the experimental firmware extension ([README.md](../README.md)). It answers two
 questions. First, can an interrupt observe or disturb the game configuration while the
 extension publishes a new profile? The audit finds the stock full configuration reload
 unsuitable and recommends an owned-byte restoration plus a bounded admission check, which the
@@ -57,7 +57,7 @@ relative to this file.
 | Producer; seal | A producer is an instruction that creates a code address later used by an indirect call or jump (for example an LEA of a function). The *producer seal* (`SETTLEMENT-GUARD.md`, **Producer seal**) checks that the final linked image contains exactly the verified producers and frames; *resealing* repeats that check after code changes. |
 | Selected arm | A case of a dispatcher or router that is reachable with the keys the analyzed producers can emit, as opposed to every case of that dispatcher. |
 | AS, SAS, BSG, MIS, SDT | The five communication protocols that router `0x26a0e` dispatches to (routers `0x2640c`, `0x23d40`, `0x1b8ca`, `0x18bea`, `0x26fc8`). SAS is the Slot Accounting System and BSG the Bally Secondary Game link; AS, MIS and SDT are the labels this analysis uses for the other three. |
-| SafeRAM | The battery-backed RAM at `0x438000..0x43ffff` ([notes/machine.md](../notes/machine.md)). |
+| SafeRAM | The battery-backed RAM at `0x438000..0x43ffff` ([notes/machine.md](../../notes/machine.md)). |
 | TRAP1 fatal halt | The native non-returning failure path, TRAP #1 → `0x0fc4` → watchdog-only loop `0x123c` (see **Calibration lifecycle and implemented enforcement policy**). |
 | Envelope; allowance; component | Stack budgets in bytes. A *component* is one interrupt level's worst inspected path; an *allowance* is a budget accepted for a whole domain; an *envelope* is a total compared with an allocation. These sums overapproximate: they assume every maximum can coexist, which no trace shows. |
 | Historical b2; candidate `06bef891` | Firmware images, identified by the first hex digits of their `main.bin` SHA-256 (table below). |
@@ -168,7 +168,7 @@ call `41614:41152`, which clears bit 80 of shadow `41242a` and writes `ff1004`. 
 0 or 1 that call runs; with 3 or 15 it does not.
 
 The output's physical meaning comes from the pinned board schematic, not from a function
-name: `docs/bally-s6000/MK14-S6MOD-0001_schematics.pdf`, **MPU Board (3 of 9),
+name: `vendor-docs/bally-s6000/MK14-S6MOD-0001_schematics.pdf`, **MPU Board (3 of 9),
 AS-03356-0424**, sheet **14-18**, **OUTPUT PORT 2A / U29 / FF1004**. Its D7 drives U29
 (74HC273) input D8, output Q8 at pin 19, then U9 (ULN2803) input I8 at pin 8 and output C8 at
 pin 11, which reaches the net explicitly labeled **COIN ENABLE / HIDRIVE15**. A crop of the
@@ -307,13 +307,13 @@ investigation.
 This section shows when the T2 interrupt flag can still be pending at idle, because a pending
 T2 flag would send the next T1 interrupt into the stepping handler `5e654`.
 
-The schematic `docs/bally-s6000/MK14-S6MOD-0001_schematics.pdf`, drawing **MPU Board (4 of 9)**
+The schematic `vendor-docs/bally-s6000/MK14-S6MOD-0001_schematics.pdf`, drawing **MPU Board (4 of 9)**
 (PDF page 19), identifies the FE10C0 VIA as **6522P2**. Native `24ae:2542` clears the auxiliary
 control register (ACR) at `fe10d7`, so T2 runs as an interval one-shot. IFR is `fe10db`, IER is
 `fe10dd`, and the T2 low and high bytes are the odd bytes covered by the longword store at
 `fe10d0`.
 
-Manufacturer reference: `docs/components/g65sc22-cmd.pdf`, CMD G65SC22, February 28, 2001,
+Manufacturer reference: `vendor-docs/components/g65sc22-cmd.pdf`, CMD G65SC22, February 28, 2001,
 sections **Timer 2 Operation**, **Timer 2 One-Shot Mode** and **Interrupt Operation**, and
 Figures **25, 27, 37 and 38**. The scanned descriptions were checked visually. After a timeout,
 T2's flag logic cannot assert again until T2-high is reloaded; reading T2-low or writing
@@ -321,7 +321,7 @@ T2-high clears IFR5; writing IER with bit 7 clear clears the selected enables. R
 not acknowledge any source, and IER bit 7 reads as 1.
 
 U41 is marked **CMD G65SC22PI-2** (observed on 2026-10-17 in photographs that are not
-distributed; see `photos/05-mpu-eproms.jpg`). `docs/components/README.md` records the
+distributed; see `photos/05-mpu-eproms.jpg`). `vendor-docs/components/README.md` records the
 datasheet's provenance and hash. This replaces reliance on the compatible WDC-family reference
 with documentation for the observed model. It is **not a test of the actual silicon's
 condition, clock or bus timing, or board behavior**.

@@ -3,7 +3,7 @@
 How to run the tests, build the experimental firmware, open the Ghidra project and
 connect the SAS tools to your own machine, for anyone with a fresh clone. Everything
 the tests and the firmware build read is in the clone: the ROM dumps in `roms/` and
-the captured machine replies in `tools/fixtures/`. The vendor documents (`docs/`) and
+the captured machine replies in `tools/fixtures/`. The vendor documents (`vendor-docs/`) and
 the Ghidra project (`ghidra/`) are there for reference. Nothing in the tests or the
 build touches a real machine; the tests drive scripted fakes and a CPU emulator.
 
@@ -96,6 +96,10 @@ shasum -a 256 firmware/build/main.bin   # macOS; sha256sum on Linux
 pinned toolchain; the ELF, map and manifest do not
 (`firmware/toolchain.md`, **Outputs and reproducibility**). The build
 is experimental and never marked installation-ready (`firmware/README.md`).
+
+GitHub Actions (`.github/workflows/ci.yml`) repeats these checks on every push: the full
+suite, the build hash and the privacy check inside the dev container image, and the
+host-tool stdlib suites on Python 3.9.
 
 ## Talking to a real machine
 

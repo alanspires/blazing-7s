@@ -3,7 +3,7 @@
 The command list is the firmware's own: the table at 0x744CA in S6M00002B5 that `sas_rx_byte`
 looks commands up in (test_sas_commands checks it against the ROM). Layouts come from IGT SAS
 6.02 (section or table cited per command) or, for the EFT polls 6.02 dropped, from SASTest's
-command definitions in docs/sas/sastest-simulator-2021/sastest.ini.
+command definitions in vendor-docs/sas/sastest-simulator-2021/sastest.ini.
 
 Encodings follow §2.2.3: BCD and ASCII most significant byte first, binary least significant
 byte first. A variable-length message has one binary length byte after the command.

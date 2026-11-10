@@ -1,4 +1,4 @@
-"""SAS code tables from the IGT SAS 6.02 appendices in docs/sas/.
+"""SAS code tables from the IGT SAS 6.02 appendices in vendor-docs/sas/.
 
 METERS (Table C-7) maps a meter code to the meter and its minimum size in BCD bytes: long
 poll 2F reports each meter in its minimum size; 6F and AF send the size with each meter.

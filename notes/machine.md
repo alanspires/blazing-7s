@@ -12,7 +12,7 @@ The later photographs in `photos/` are cited only where they show the item.
 
 It is a **ProSlot 6000 (S6000)**, not an S5500: the MPU silkscreen reads "S6000 MPU" and
 the door label is "ProSlot-6000 Exception Codes". The S6000 manuals in
-`docs/bally-s6000/` apply; the S5500 manuals do not.
+`vendor-docs/bally-s6000/` apply; the S5500 manuals do not.
 
 ## Game
 

@@ -141,7 +141,7 @@ to these parallel EPROMs.
 
 ### ST device requirements
 
-The retained [ST M27C4001 datasheet](../docs/components/m27c4001-st.pdf), Rev 4,
+The retained [ST M27C4001 datasheet](../vendor-docs/components/m27c4001-st.pdf), Rev 4,
 provides these requirements:
 
 - **Summary description / DIP Connections:** 524,288 × 8 bits (512 KiB total),

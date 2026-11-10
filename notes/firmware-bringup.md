@@ -16,8 +16,8 @@ replayed and no firmware was reflashed during these tests.
 
 **Run ids.** Ids such as `j83` name individual host-tool runs. Each one labels the
 captured output stored under that id in
-[`firmware-bringup-evidence.json`](firmware-bringup-evidence.json) (`j83`–`j101`),
-[`firmware-cli-acceptance-evidence.json`](firmware-cli-acceptance-evidence.json)
+[`firmware-bringup-evidence.json`](evidence/firmware-bringup-evidence.json) (`j83`–`j101`),
+[`firmware-cli-acceptance-evidence.json`](evidence/firmware-cli-acceptance-evidence.json)
 (`j108`–`j113`) or, for the two timing traces, the replay fixture
 `tools/fixtures/s6000_profile_reply_timing.json` (`j103`, `j104`).
 
@@ -48,7 +48,7 @@ The [programming record](../firmware/PROGRAMMING.md) identifies the exact chip i
 Full lane readbacks were checked before installation. This record does not infer
 installed byte identity solely from a SAS signature or extension version.
 
-The [captured evidence](firmware-bringup-evidence.json) preserves the exact outputs
+The [captured evidence](evidence/firmware-bringup-evidence.json) preserves the exact outputs
 of runs `j83` through `j101`. Each run records its log file name (with the local
 directory replaced by a placeholder). These are semantic host results, not raw serial
 timing traces. Missing replies alone do not identify their cause.
@@ -178,14 +178,14 @@ host/profile files and opened no serial port. The single-threaded probe kept the
 production serial receive/framing loop, recorded its real `os.read` chunks, used a
 two-second first-byte observation window and disabled retransmission for every
 command. Its source is preserved as
-[historical probe text](firmware-reply-probe-source.txt), not a maintained CLI.
+[historical probe text](evidence/firmware-reply-probe-source.txt), not a maintained CLI.
 It uses the pre-fix host adapter interface and is not intended for direct reuse.
 
 The full, unchanged JSON-lines outputs are in this directory:
 
-- `j103`: [upload trace](firmware-reply-probe-upload.jsonl), SHA-256
+- `j103`: [upload trace](evidence/firmware-reply-probe-upload.jsonl), SHA-256
   `8703f9597220bc15508a5cb8a804f9c4dce7a10de4a1605c0292ece382efcd0b`.
-- `j104`: [restore trace](firmware-reply-probe-restore.jsonl), SHA-256
+- `j104`: [restore trace](evidence/firmware-reply-probe-restore.jsonl), SHA-256
   `f7c5006cef3a17813325c9f4368e774d46fc5f68dc452f8a70bb80d4e537f9a5`.
 - Probe source SHA-256, also printed by the staging run:
   `d1577222397928a6bbb0d605ec6bfc88f85b051fffe6a455686fa05d1a0460a2`.
@@ -241,7 +241,7 @@ probe or a global timeout override. The profile was again stock-equivalent; no
 spins, transfers, initialization, reflash, power interruption or fault injection
 were performed.
 
-The [acceptance evidence](firmware-cli-acceptance-evidence.json) preserves all 17
+The [acceptance evidence](evidence/firmware-cli-acceptance-evidence.json) preserves all 17
 saved JSON files and six exact run logs (`j108`–`j113`). These are semantic CLI
 results, not a new serial timing capture. The tested host source is a commit in
 private development history that is not in the public repository; the evidence
@@ -278,7 +278,7 @@ The limited live checks above do not establish SRAM write atomicity, power-fail
 write inhibition or timing, long-duration retention, all native game paths,
 progressive/handpay behavior, standalone reel diagnostics, or physical fatal-halt
 and recovery behavior. See [provisioning](../firmware/PROVISIONING.md) and the
-[settlement guard](../firmware/SETTLEMENT-GUARD.md) for the original premises.
+[settlement guard](../firmware/audits/SETTLEMENT-GUARD.md) for the original premises.
 The offline-era statements in those documents predate this live record; they are
 not evidence that these later tests were never performed.
 

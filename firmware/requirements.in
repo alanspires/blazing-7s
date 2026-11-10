@@ -1,0 +1,4 @@
+# Direct dependencies for firmware tests; lock with:
+#   uv pip compile --python-version 3.12 --generate-hashes requirements.in -o requirements.txt
+pytest==9.1.1
+unicorn==2.1.4

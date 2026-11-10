@@ -1,0 +1,80 @@
+{"command": "meters-10-15", "code": "0F", "values": [], "data": "00 00 00 00 00 00 05 48 00 00 15 62 00 00 00 00 00 00 60 00 00 00 01 83", "reply": {"cancelled_credits": 0, "coin_in": 548, "coin_out": 1562, "drop": 0, "jackpot": 6000, "games_played": 183}}
+{"command": "cancelled-credits", "code": "10", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "coin-in", "code": "11", "values": [], "data": "00 00 05 48", "reply": {"value": 548}}
+{"command": "coin-out", "code": "12", "values": [], "data": "00 00 15 62", "reply": {"value": 1562}}
+{"command": "drop", "code": "13", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "jackpot", "code": "14", "values": [], "data": "00 00 60 00", "reply": {"value": 6000}}
+{"command": "games-played", "code": "15", "values": [], "data": "00 00 01 83", "reply": {"value": 183}}
+{"command": "games-won", "code": "16", "values": [], "data": "00 00 00 25", "reply": {"value": 25}}
+{"command": "games-lost", "code": "17", "values": [], "data": "00 00 01 58", "reply": {"value": 158}}
+{"command": "games-since", "code": "18", "values": [], "data": "00 00 00 00", "reply": {"since_power_up": 0, "since_door_closed": 0}}
+{"command": "meters-11-15", "code": "19", "values": [], "data": "00 00 05 48 00 00 15 62 00 00 00 00 00 00 60 00 00 00 01 83", "reply": {"coin_in": 548, "coin_out": 1562, "drop": 0, "jackpot": 6000, "games_played": 183}}
+{"command": "credits", "code": "1A", "values": [], "data": "00 00 10 14", "reply": {"value": 1014}}
+{"command": "handpay-info", "code": "1B", "values": [], "data": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"progressive_group": 0, "level": 0, "amount": 0, "partial_pay": 0, "reset_id": 0, "unused": "00 00 00 00 00 00 00 00 00 00"}}
+{"command": "meters", "code": "1C", "values": [], "data": "00 00 05 48 00 00 15 62 00 00 00 00 00 00 60 00 00 00 01 83 00 00 00 25 00 00 00 14 00 00 00 09", "reply": {"coin_in": 548, "coin_out": 1562, "drop": 0, "jackpot": 6000, "games_played": 183, "games_won": 25, "slot_door_opened": 14, "power_reset": 9}}
+{"command": "eft-meters", "code": "1D", "values": [], "data": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"promotional": 0, "non_cashable": 0, "uploaded": 0, "cashable": 0}}
+{"command": "bill-meters", "code": "1E", "values": [], "data": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"bills_1": 0, "bills_5": 0, "bills_10": 0, "bills_20": 0, "bills_50": 0, "bills_100": 0}}
+{"command": "info", "code": "1F", "values": [], "data": "42 53 31 30 35 06 03 00 68 01 45 35 39 35 32 31 39 30 38 35", "reply": {"game_id": "BS", "additional_id": "105", "denomination": 6, "max_bet": 3, "progressive_group": 0, "game_options": "0x0168", "paytable": "E59521", "base_percent": "9085"}}
+{"command": "bill-dollars", "code": "20", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "eft-promo-credits", "code": "27", "values": [], "data": "00 00 00 00", "reply": {"credits": 0}}
+{"command": "eft-log", "code": "28", "values": [], "data": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"transaction_1": "00 00 00 00 00 00 00 00 00", "transaction_2": "00 00 00 00 00 00 00 00 00", "transaction_3": "00 00 00 00 00 00 00 00 00", "transaction_4": "00 00 00 00 00 00 00 00 00", "transaction_5": "00 00 00 00 00 00 00 00 00"}}
+{"command": "true-coin-in", "code": "2A", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "true-coin-out", "code": "2B", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "hopper-level", "code": "2C", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "handpaid-cancelled", "code": "2D", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "handpaid_credits": 0}}
+{"command": "selected-meters", "code": "2F", "values": ["0", "0", "1", "5", "0x0C"], "data": "16 00 00 00 00 00 05 48 01 00 00 15 62 05 00 00 01 83 0c 00 00 10 14", "reply": {"game": 0, "items": [{"meter": 0, "value": 548}, {"meter": 1, "value": 1562}, {"meter": 5, "value": 183}, {"meter": 12, "value": 1014}]}}
+{"command": "bills-1", "code": "31", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-2", "code": "32", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-5", "code": "33", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-10", "code": "34", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-20", "code": "35", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-50", "code": "36", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-100", "code": "37", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-500", "code": "38", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-1000", "code": "39", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-200", "code": "3A", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-25", "code": "3B", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-2000", "code": "3C", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "cashout-ticket", "code": "3D", "values": [], "data": "00 00 00 00 00 00 00 00 00", "reply": {"validation_number": "00000000", "amount_cents": 0}}
+{"command": "bills-2500", "code": "3E", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-5000", "code": "3F", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-10000", "code": "40", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-20000", "code": "41", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-25000", "code": "42", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-50000", "code": "43", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-100000", "code": "44", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bills-250", "code": "45", "values": [], "data": "00 00 00 00", "reply": {"bills": 0}}
+{"command": "bill-credits", "code": "46", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "last-bill", "code": "48", "values": [], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "stacker-bills", "code": "49", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "stacker-credits", "code": "4A", "values": [], "data": "00 00 00 00", "reply": {"value": 0}}
+{"command": "set-validation-id", "code": "4C", "values": ["0", "0"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "validation-info", "code": "4D", "values": ["255"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "hopper-status", "code": "4F", "values": [], "data": "02 00 ff", "reply": {"status": 0, "percent_full": 255}}
+{"command": "validation-meters", "code": "50", "values": ["0"], "data": "00 00 00 00 00 00 00 00 00 00", "reply": {"type": 0, "count": 0, "amount_cents": 0}}
+{"command": "game-count", "code": "51", "values": [], "data": "00 01", "reply": {"games": 1}}
+{"command": "game-meters", "code": "52", "values": ["0"], "data": "00 00 00 00 05 48 00 00 15 62 00 00 60 00 00 00 01 83", "reply": {"game": 0, "coin_in": 548, "coin_out": 1562, "jackpot": 6000, "games_played": 183}}
+{"command": "game-config", "code": "53", "values": ["0"], "data": "00 00 42 53 31 30 35 06 03 00 68 01 45 35 39 35 32 31 39 30 38 35", "reply": {"game": 0, "game_id": "BS", "additional_id": "105", "denomination": 6, "max_bet": 3, "progressive_group": 0, "game_options": "0x0168", "paytable": "E59521", "base_percent": "9085"}}
+{"command": "version", "code": "54", "values": [], "data": "0b 36 30 31 31 32 33 34 35 36 37 38", "reply": {"sas_version": "601", "serial_number": "12345678"}}
+{"command": "selected-game", "code": "55", "values": [], "data": "00 01", "reply": {"game": 1}}
+{"command": "enabled-games", "code": "56", "values": [], "data": "03 01 00 01", "reply": {"count": 1, "items": [{"game": 1}]}}
+{"command": "eft-available", "code": "6A", "values": [], "data": "00 00 00 03", "reply": {"reserved": "00 00 00", "available": "0x03"}}
+{"command": "authentication", "code": "6E", "values": ["0"], "data": "0a 61 24 01 00 01 02 00 00 00 00", "reply": {"list_crc": 9313, "status": 1, "name": "", "size": 2, "available_methods": "0x00000000"}}
+{"command": "extended-meters", "code": "6F", "values": ["0", "0", "1", "5", "0x0C", "0x7F"], "data": "27 00 00 00 00 05 00 00 00 05 48 01 00 05 00 00 00 15 62 05 00 04 00 00 01 83 0c 00 04 00 00 10 14 7f 00 04 00 01 02 55", "reply": {"game": 0, "items": [{"meter": 0, "value": 548}, {"meter": 1, "value": 1562}, {"meter": 5, "value": 183}, {"meter": 12, "value": 1014}, {"meter": 127, "value": 10255}]}}
+{"command": "aft-transfer", "code": "72", "values": ["0xFE", "0"], "data": "29 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"position": 0, "status": 0, "receipt_status": 0, "type": 0, "cashable_cents": 0, "restricted_cents": 0, "nonrestricted_cents": 0, "flags": "0x00", "asset": 0, "transaction_id": "", "date": "00000000", "time": "000000", "expiration": "00000000", "pool_id": 0, "cumulative_cashable": 0, "cumulative_restricted": 0, "cumulative_nonrestricted": 0}}
+{"command": "aft-register", "code": "73", "values": ["0xFF"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"command": "aft-lock", "code": "74", "values": ["0xFF", "0", "0"], "data": "23 39 30 00 00 ff 13 01 f0 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 255, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF0", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"command": "date-time", "code": "7E", "values": [], "data": "10 18 20 26 00 36 34", "reply": {"date": "10182026", "time": "003634"}}
+{"command": "progressive-wins", "code": "83", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "progressive_wins": 0}}
+{"command": "progressive-win", "code": "84", "values": [], "data": "00 00 00 00 00 00 00", "reply": {"group": 0, "level": 0, "amount_cents": 0}}
+{"command": "reel-stops", "code": "8F", "values": [], "data": "15 05 0b ff ff ff ff ff ff", "reply": {"stops": "15 05 0b ff ff ff ff ff ff"}}
+{"command": "legacy-bonus-win", "code": "90", "values": [], "data": "00 00 00 00 00 00 00 00 00 00", "reply": {"multiplier": 0, "multiplied_win": 0, "tax_status": 0, "bonus": 0}}
+{"command": "tournament-games-played", "code": "95", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "games": 0}}
+{"command": "tournament-games-won", "code": "96", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "games": 0}}
+{"command": "tournament-credits-wagered", "code": "97", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "credits": 0}}
+{"command": "tournament-credits-won", "code": "98", "values": ["0"], "data": "00 00 00 00 00 00", "reply": {"game": 0, "credits": 0}}
+{"command": "tournament-meters", "code": "99", "values": ["0"], "data": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"game": 0, "games_played": 0, "games_won": 0, "credits_wagered": 0, "credits_won": 0}}
+{"command": "legacy-bonus-meters", "code": "9A", "values": ["0"], "data": "00 00 00 00 70 00 00 00 00 00 00 00 00 00", "reply": {"game": 0, "deductible": 7000, "non_deductible": 0, "wager_match": 0}}
+{"command": "features", "code": "A0", "values": ["0"], "data": "00 00 a6 5d 01 00 00 00", "reply": {"game": 0, "features_1": "0xA6", "features_2": "0x5D", "features_3": "0x01", "reserved": "00 00 00"}}
+{"command": "cashout-limit", "code": "A4", "values": ["0"], "data": "00 00 00 00", "reply": {"game": 0, "limit": 0}}
+{"command": "extended-meters-alt", "code": "AF", "values": ["0", "0", "1", "5", "0x0C", "0x7F"], "data": "27 00 00 00 00 05 00 00 00 05 48 01 00 05 00 00 00 15 62 05 00 04 00 00 01 83 0c 00 04 00 00 10 14 7f 00 04 00 01 02 55", "reply": {"game": 0, "items": [{"meter": 0, "value": 548}, {"meter": 1, "value": 1562}, {"meter": 5, "value": 183}, {"meter": 12, "value": 1014}, {"meter": 127, "value": 10255}]}}

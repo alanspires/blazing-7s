@@ -1,0 +1,1 @@
+PSP version 3.00 and 3.01 does not support Mikohn Con1 controllers or Standard Chameleon (cham1) displays 

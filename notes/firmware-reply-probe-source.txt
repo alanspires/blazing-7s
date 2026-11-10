@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""One approved profile transition, with receive-only timing instrumentation."""
+
+import argparse
+import hashlib
+import json
+import os
+import time
+import zlib
+from pathlib import Path
+
+import sas as cli
+import sas_client
+import sas_commands as commands
+import sas_extension as extension
+import sas_profile as profiles
+import sas_protocol as protocol
+
+OBSERVATION_WINDOW = 2.0
+PROFILE_SHA256 = "c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477"
+FINANCIAL_METERS = ("coin_in", "coin_out", "drop", "jackpot", "games_played", "games_won")
+
+
+def emit(value):
+    print(json.dumps(value, sort_keys=True), flush=True)
+
+
+class TracedLine:
+    def __init__(self, inner, report=emit):
+        self.inner = inner
+        self.report = report
+        self.sequence = 0
+        self.request = None
+
+    def send(self, first, rest):
+        self.sequence += 1
+        request = {"sequence": self.sequence, "tx_hex": (bytes((first,)) + rest).hex()}
+        if rest and rest[0] == extension.EXTENSION_POLL:
+            body = rest[2:2 + rest[1]]
+            request.update(operation=extension.Op(body[5]).name,
+                           request_id=int.from_bytes(body[6:extension.REQUEST_HEADER], "little"))
+        self.request = request
+        self.report({"event": "tx_intent", **request})
+        self.inner.send(first, rest)
+
+    def wait(self, seconds):
+        self.inner.wait(seconds)
+
+    def read_message(self, timeout):
+        started = time.monotonic_ns()
+        chunks = []
+        fd = self.inner.port.fileno()
+        original_read = os.read
+
+        def observe_read(read_fd, size):
+            data = original_read(read_fd, size)
+            if read_fd == fd and data:
+                chunks.append({"after_wait_ms": (time.monotonic_ns() - started) / 1_000_000,
+                               "hex": data.hex()})
+            return data
+
+        # Observe real reads while retaining the production receive/framing loop.
+        # This probe is single-threaded; the process-global hook is always restored.
+        os.read = observe_read
+        try:
+            return self.inner.read_message(timeout)
+        finally:
+            os.read = original_read
+            self.report({"event": "rx_observation", "request": self.request,
+                         "window_s": timeout,
+                         "standard_window_s": protocol.Host.RESPONSE_TIMEOUT,
+                         "first_byte_after_wait_ms": chunks[0]["after_wait_ms"] if chunks else None,
+                         "chunks": chunks})
+
+
+class OnceHost:
+    def __init__(self, line):
+        self.host = protocol.Host(line, 1, timeout=OBSERVATION_WINDOW)
+
+    def long_poll(self, command, data=b"", crc=True, *, retry=True):
+        return self.host.long_poll(command, data, crc, retry=False)
+
+
+def require(condition, code):
+    if not condition:
+        raise RuntimeError(code)
+
+
+def native_read(host, name):
+    result = sas_client.poll(host, commands.find(name), [], retry=False)
+    emit({"event": "native_read", "result": result})
+    require("error" not in result, "NATIVE_READ_FAILED")
+    return result["reply"]
+
+
+def run(args):
+    data = profiles.encode(profiles.read_json(args.profile))
+    require(hashlib.sha256(data).hexdigest() == PROFILE_SHA256, "PROFILE_PIN_MISMATCH")
+    profile_crc = zlib.crc32(data)
+    emit({"event": "probe_start", "action": args.action,
+          "profile_sha256": PROFILE_SHA256, "profile_crc": f"{profile_crc:08X}",
+          "observation_window_s": OBSERVATION_WINDOW,
+          "production_window_s": protocol.Host.RESPONSE_TIMEOUT,
+          "expected_next_id": args.expected_next_id,
+          "expected_generation": args.expected_generation,
+          "policy": "No retransmission, spins or transfers; stop on any uncertainty."})
+    line = cli.SerialLine(args.port)
+    try:
+        host = OnceHost(TracedLine(line))
+        ext = extension.Extension(host)
+        info_before = ext.info()
+        state_before = ext.status()
+        credits_before = native_read(host, "credits")
+        meters_before = native_read(host, "meters")
+        emit({"event": "preflight", "info": info_before.report(), "status": state_before.report()})
+        require(info_before.next_id == args.expected_next_id, "NEXT_ID_MISMATCH")
+        require(state_before.last_id == args.expected_next_id - 1, "LAST_ID_MISMATCH")
+        require(state_before.generation == args.expected_generation, "GENERATION_MISMATCH")
+        require(state_before.last_status == extension.Status.OK and not state_before.fault,
+                "STATE_NOT_READY")
+        require(credits_before["value"] == args.expected_credits, "CREDIT_BASELINE_MISMATCH")
+        if args.action == "upload":
+            require(not state_before.active, "EXPECTED_STOCK_MODE")
+            chunks = (len(data) + info_before.max_chunk - 1) // info_before.max_chunk
+            expected_id = info_before.next_id + 1 + chunks
+            result = extension.upload(ext, str(args.profile))
+            require(result["id"] == expected_id, "UNEXPECTED_COMMIT_ID")
+        else:
+            require(state_before.active and state_before.profile_crc == profile_crc,
+                    "EXPECTED_TEST_PROFILE")
+            actual, downloaded_state = extension.download(ext)
+            require(profiles.encode(actual) == data and downloaded_state == state_before,
+                    "PROFILE_BEFORE_RESTORE_MISMATCH")
+            expected_id = info_before.next_id
+            result = extension.restore(ext, explicit_id=expected_id)
+        emit({"event": "mutation_verified", "action": args.action, "result": result})
+        state_after = ext.status()
+        info_after = ext.info()
+        credits_after = native_read(host, "credits")
+        meters_after = native_read(host, "meters")
+        require(state_after.last_id == expected_id and state_after.last_status == extension.Status.OK
+                and not state_after.fault, "FINAL_REQUEST_STATE_MISMATCH")
+        require(state_after.active == (args.action == "upload"), "FINAL_MODE_MISMATCH")
+        require(state_after.generation == state_before.generation + 1, "FINAL_GENERATION_MISMATCH")
+        require(info_after.next_id == expected_id + 1, "FINAL_NEXT_ID_MISMATCH")
+        require(credits_after == credits_before, "CREDITS_CHANGED")
+        require(all(meters_after[key] == meters_before[key] for key in FINANCIAL_METERS),
+                "FINANCIAL_METERS_CHANGED")
+        emit({"event": "probe_complete", "action": args.action,
+              "info": info_after.report(), "status": state_after.report(),
+              "credits": credits_after, "meters": meters_after})
+    finally:
+        line.port.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("upload", "restore"))
+    parser.add_argument("--port", required=True)
+    parser.add_argument("--profile", type=Path, required=True)
+    parser.add_argument("--expected-next-id", type=int, required=True)
+    parser.add_argument("--expected-generation", type=int, required=True)
+    parser.add_argument("--expected-credits", type=int, required=True)
+    run(parser.parse_args())
+
+
+if __name__ == "__main__":
+    main()

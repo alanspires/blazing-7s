@@ -1,0 +1,8 @@
+{
+  "source": "long poll 21 answers from the S6000 on J10 (notes/sas-j10.md)",
+  "images": ["roms/s6000_main_S6M00002B5.bin", "roms/personality_E595211X-05.bin"],
+  "signatures": [
+    {"seed": "0x0000", "signature": "0xCCFB"},
+    {"seed": "0x1234", "signature": "0x0C2B"}
+  ]
+}

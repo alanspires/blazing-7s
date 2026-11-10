@@ -1,0 +1,92 @@
+{"exception": "3F", "real_time": false}
+{"exception": "8E", "real_time": false}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 c5", "reply": {"list_crc": 9313, "status": 197}}
+{"command": "aft-lock", "code": "74", "values": ["255", "0", "0"], "data": "23 39 30 00 00 ff 13 01 f0 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 255, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF0", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"command": "aft-register", "code": "73", "values": ["255"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"step": "enable_game", "about": "09 sets and clears the play-disabled bit (bit 7 of 0x412D38) in its handler"}
+{"command": "enable-game", "code": "09", "values": ["1", "0"], "data": null, "reply": "ACK"}
+{"check": "09 disable game 1: ACK", "ok": true, "detail": ""}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 80", "reply": {"list_crc": 9313, "status": 128}}
+{"check": "6E probe shows play disabled", "ok": true, "detail": ""}
+{"command": "enable-game", "code": "09", "values": ["1", "1"], "data": null, "reply": "ACK"}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 c5", "reply": {"list_crc": 9313, "status": 197}}
+{"check": "restored: game 1 enabled", "ok": true, "detail": ""}
+{"step": "shutdown", "about": "01 sets the shutdown flag (0x43D150, SAFERAM) to 1; the main loop, once the machine is\nidle, disables play and sets it to 2"}
+{"command": "shutdown", "code": "01", "values": [], "data": null, "reply": "ACK"}
+{"check": "01 shutdown: ACK", "ok": true, "detail": ""}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 80", "reply": {"list_crc": 9313, "status": 128}}
+{"check": "6E probe shows play disabled", "ok": true, "detail": ""}
+{"command": "startup", "code": "02", "values": [], "data": null, "reply": "ACK"}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 c5", "reply": {"list_crc": 9313, "status": 197}}
+{"check": "restored: play enabled", "ok": true, "detail": ""}
+{"step": "sound", "about": "03 and 05 clear the sound flags in SAFERAM (0x43E8E2, 0x43E8E3); 04 sets both to 1,\ntheir RAM-clear value (FUN_0005603a)"}
+{"command": "sound-off", "code": "03", "values": [], "data": null, "reply": "ACK"}
+{"check": "03 sound-off: ACK", "ok": true, "detail": ""}
+{"command": "reel-sounds-off", "code": "05", "values": [], "data": null, "reply": "ACK"}
+{"check": "05 reel-sounds-off: ACK", "ok": true, "detail": ""}
+{"command": "sound-on", "code": "04", "values": [], "data": null, "reply": "ACK"}
+{"check": "restored: sound on", "ok": true, "detail": ""}
+{"step": "clock", "about": "7F writes the clock chip and sends no reply at all (FUN_0002eaac never ACKs, unlike\nTable 7.17); 7E reads it back"}
+{"command": "date-time", "code": "7E", "values": [], "data": "10 18 20 26 00 32 02", "reply": {"date": "10182026", "time": "003202"}}
+{"command": "set-date-time", "code": "7F", "values": ["10182026", "013202"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"check": "7F gets no reply", "ok": true, "detail": ""}
+{"command": "date-time", "code": "7E", "values": [], "data": "10 18 20 26 01 32 02", "reply": {"date": "10182026", "time": "013202"}}
+{"check": "7E reads the test time", "ok": true, "detail": "2026-10-18 01:32:02"}
+{"command": "set-date-time", "code": "7F", "values": ["10182026", "003203"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "date-time", "code": "7E", "values": [], "data": "10 18 20 26 00 32 03", "reply": {"date": "10182026", "time": "003203"}}
+{"check": "restored: clock", "ok": true, "detail": ""}
+{"step": "aft_lock", "about": "74 lock code 00 locks play (bit 30 of 0x412D38) and posts 6F, 80 cancels it"}
+{"command": "real-time-events", "code": "0E", "values": ["1"], "data": null, "reply": "ACK"}
+{"check": "0E real-time events on: ACK", "ok": true, "detail": ""}
+{"command": "aft-lock", "code": "74", "values": ["0", "0", "1000"], "data": "23 39 30 00 00 00 13 01 f0 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 0, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF0", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"check": "74 lock: locked", "ok": true, "detail": "0"}
+{"exception": "6F", "real_time": true}
+{"check": "6F game locked comes as an event", "ok": true, "detail": ""}
+{"command": "aft-lock", "code": "74", "values": ["128", "0", "0"], "data": "23 39 30 00 00 ff 13 01 f0 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 255, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF0", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"check": "restored: AFT lock cancelled", "ok": true, "detail": ""}
+{"command": "real-time-events", "code": "0E", "values": ["0"], "data": null, "reply": "ACK"}
+{"check": "restored: real-time events off", "ok": true, "detail": ""}
+{"step": "aft_registration", "about": "73 code 00 stores a key and POS ID (status 00); 01 registers (01) once a non-zero key\nis stored; 80 unregisters (80) and posts 6E but keeps the key and POS ID, so the restore\nstores the ones found with 00 and unregisters again (FUN_0002fee4)."}
+{"command": "aft-register", "code": "73", "values": ["255"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"check": "found unregistered", "ok": true, "detail": "128"}
+{"command": "aft-register", "code": "73", "values": ["0", "12345", "0102030405060708090a0b0c0d0e0f1011121314", "1"], "data": "1d 00 39 30 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 01 00 00 00", "reply": {"status": 0, "asset": 12345, "registration_key": "01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14", "pos_id": 1}}
+{"check": "73 00: registration ready", "ok": true, "detail": "0"}
+{"command": "aft-register", "code": "73", "values": ["1", "12345", "0102030405060708090a0b0c0d0e0f1011121314", "1"], "data": "1d 01 39 30 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 01 00 00 00", "reply": {"status": 1, "asset": 12345, "registration_key": "01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14", "pos_id": 1}}
+{"check": "73 01: registered with the test key and POS ID", "ok": true, "detail": "{'status': 1, 'asset': 12345, 'registration_key': '01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14', 'pos_id': 1}"}
+{"command": "aft-lock", "code": "74", "values": ["255", "0", "0"], "data": "23 39 30 00 00 ff 13 01 f8 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 255, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF8", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"check": "74 shows AFT registered", "ok": true, "detail": ""}
+{"command": "aft-register", "code": "73", "values": ["128"], "data": "1d 80 39 30 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 01 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14", "pos_id": 1}}
+{"check": "73 80: unregistered", "ok": true, "detail": "128"}
+{"exception": "6E", "real_time": false}
+{"check": "6E registration cancelled", "ok": true, "detail": ""}
+{"command": "aft-register", "code": "73", "values": ["0", "12345", "0000000000000000000000000000000000000000", "0"], "data": "1d 00 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 0, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"command": "aft-register", "code": "73", "values": ["128"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"exception": "6E", "real_time": false}
+{"command": "aft-register", "code": "73", "values": ["255"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"check": "restored: registration as found", "ok": true, "detail": ""}
+{"step": "status_only", "about": "With nothing in progress these answer with a status and change nothing the machine\nkeeps: AA 00 with auto rebet off, 94 and A8 with no handpay (answered only when the\noption for them is on), 58 with no cashout waiting for a validation number, an empty 75,\n4C with ID 0 (answered only with secure enhanced validation), and 7B, 7C and 7D with\nnothing to set"}
+{"command": "auto-rebet", "code": "AA", "values": ["0"], "data": null, "reply": "ACK"}
+{"check": "AA 00 auto rebet off: ACK", "ok": true, "detail": ""}
+{"command": "reset-handpay", "code": "94", "values": [], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"check": "94 reset-handpay: 02 or no reply", "ok": true, "detail": "None"}
+{"command": "handpay-reset-method", "code": "A8", "values": ["0"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"check": "A8 handpay-reset-method: 02 or no reply", "ok": true, "detail": "None"}
+{"command": "validation-number", "code": "58", "values": ["0", "0"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"check": "58 validation-number: 80 or no reply", "ok": true, "detail": "None"}
+{"command": "aft-receipt-data", "code": "75", "values": [], "data": null, "reply": "ACK"}
+{"check": "75 empty receipt data: ACK", "ok": true, "detail": ""}
+{"command": "set-validation-id", "code": "4C", "values": ["0", "0"], "error": "no reply from address 1", "error_type": "NoResponse"}
+{"command": "validation-status", "code": "7B", "values": ["0", "0", "0", "0"], "data": "0a 39 30 00 00 3f 00 00 00 00 00", "reply": {"asset": 12345, "status": "0x003F", "cashable_expiration": 0, "restricted_expiration": 0}}
+{"check": "7B answers", "ok": true, "detail": "None"}
+{"exception": "3F", "real_time": false}
+{"check": "7B posts 3F", "ok": true, "detail": ""}
+{"command": "extended-ticket-data", "code": "7C", "values": [], "data": "00", "reply": {"ticket_data_valid": 0}}
+{"check": "7C extended-ticket-data with no data answers", "ok": true, "detail": "None"}
+{"command": "ticket-data-set", "code": "7D", "values": [], "data": "00", "reply": {"ticket_data_valid": 0}}
+{"check": "7D ticket-data-set with no data answers", "ok": true, "detail": "None"}
+{"step": "as_found", "about": "play, the AFT status and the registration read as before"}
+{"command": "authentication", "code": "6E", "values": ["2", "0", "0xFF"], "data": "03 61 24 c5", "reply": {"list_crc": 9313, "status": 197}}
+{"command": "aft-lock", "code": "74", "values": ["255", "0", "0"], "data": "23 39 30 00 00 ff 13 01 f0 46 00 00 10 14 00 00 00 00 00 00 00 00 00 00 00 00 00 89 85 00 10 17 20 26 00 00", "reply": {"asset": 12345, "lock_status": 255, "available_transfers": "0x13", "host_cashout_status": "0x01", "aft_status": "0xF0", "max_history_index": 70, "cashable_cents": 101400, "restricted_cents": 0, "nonrestricted_cents": 0, "transfer_limit_cents": 898500, "restricted_expiration": "10172026", "restricted_pool_id": 0}}
+{"command": "aft-register", "code": "73", "values": ["255"], "data": "1d 80 39 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "reply": {"status": 128, "asset": 12345, "registration_key": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "pos_id": 0}}
+{"check": "restored: machine as found", "ok": true, "detail": ""}

@@ -1,0 +1,7 @@
+{
+  "name": "blazing-7s",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  }
+}

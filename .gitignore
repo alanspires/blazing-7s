@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+/firmware/.venv/
+/firmware/build/
+# Agent sessions and plans stay local; tools/privacy_check.py rejects them if tracked
+/.pi/
+/.plans/
+# Ghidra holds these while the project is open
+ghidra/proj/*.lock
+ghidra/proj/*.lock~
+ghidra/proj/**/tmp*.ps
+ghidra/proj/**/~*.bak
+ghidra/proj/**/change*.grf
+ghidra/proj/**/snapshot*.grf

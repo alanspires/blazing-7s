@@ -1,0 +1,9 @@
+.git
+.pi
+.plans
+firmware/.venv
+firmware/build
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store

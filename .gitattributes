@@ -1,0 +1,2 @@
+# Ghidra generates this XML with CRLF; cr-at-eol recognizes that format while retaining standard whitespace checks.
+ghidra/proj/bally.rep/projectState whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

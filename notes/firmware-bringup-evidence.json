@@ -1,0 +1,105 @@
+{
+  "captured_at_utc": "2026-10-19T13:06:39Z",
+  "machine": "Bally ProSlot 6000, E595211X-05",
+  "main_sha256": "06bef89137d206e8113bbe096a06d30dcb45e960f764d9350b777033b83e7197",
+  "manifest_sha256": "ef1728ca2cb342666e6b31ebee1be8fdc411322b36f7c509c67dfb296b5f7b01",
+  "note": "Exact tool-read job outputs. Jobs report semantic SAS data, not raw serial timing traces. No inference that a missing reply proves a particular latency or firmware cause.",
+  "redactions": "For publication, local job-log directories are replaced by <job-log-dir>; everything else is as captured.",
+  "runs": [
+    {
+      "id": "j83",
+      "source": "<job-log-dir>/j83.log",
+      "output": "{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 48 00 00 15 63 00 00 10 15 00 00 60 00 00 00 01 83 00 00 00 25 00 00 00 14 00 00 00 09\", \"reply\": {\"coin_in\": 548, \"coin_out\": 1563, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 183, \"games_won\": 25, \"slot_door_opened\": 14, \"power_reset\": 9}}\n{\"command\": \"info\", \"code\": \"1F\", \"values\": [], \"data\": \"42 53 31 30 35 06 03 00 68 01 45 35 39 35 32 31 39 30 38 35\", \"reply\": {\"game_id\": \"BS\", \"additional_id\": \"105\", \"denomination\": 6, \"max_bet\": 3, \"progressive_group\": 0, \"game_options\": \"0x0168\", \"paytable\": \"E59521\", \"base_percent\": \"9085\"}}\n"
+    },
+    {
+      "id": "j84",
+      "source": "<job-log-dir>/j84.log",
+      "output": "{\"command\": \"commission-info\", \"error\": \"INFO: no valid reply within 2.0 s\", \"error_type\": \"NoReply\"}\n"
+    },
+    {
+      "id": "j85",
+      "source": "<job-log-dir>/j85.log",
+      "output": "{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n"
+    },
+    {
+      "id": "j86",
+      "source": "<job-log-dir>/j86.log",
+      "output": "{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 1, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 0, \"last_operation\": \"INFO\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 48 00 00 15 63 00 00 10 15 00 00 60 00 00 00 01 83 00 00 00 25 00 00 00 15 00 00 00 10\", \"reply\": {\"coin_in\": 548, \"coin_out\": 1563, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 183, \"games_won\": 25, \"slot_door_opened\": 15, \"power_reset\": 10}}\n"
+    },
+    {
+      "id": "j87",
+      "source": "<job-log-dir>/j87.log",
+      "output": "{\n  \"version\": 1,\n  \"lines\": 1,\n  \"max_bet_per_line\": 3,\n  \"weights\": [\n    [\n      1,\n      1,\n      2\n    ],\n    [\n      2,\n      2,\n      1\n    ],\n    [\n      1,\n      1,\n      2\n    ],\n    [\n      2,\n      1,\n      2\n    ],\n    [\n      1,\n      1,\n      1\n    ],\n    [\n      1,\n      2,\n      1\n    ],\n    [\n      2,\n      3,\n      1\n    ],\n    [\n      1,\n      2,\n      3\n    ],\n    [\n      2,\n      3,\n      2\n    ],\n    [\n      1,\n      1,\n      1\n    ],\n    [\n      1,\n      1,\n      1\n    ],\n    [\n      1,\n      1,\n      3\n    ],\n    [\n      1,\n      1,\n      2\n    ],\n    [\n      2,\n      1,\n      1\n    ],\n    [\n      1,\n      1,\n      2\n    ],\n    [\n      3,\n      3,\n      1\n    ],\n    [\n      2,\n      1,\n      1\n    ],\n    [\n      1,\n      2,\n      1\n    ],\n    [\n      2,\n      1,\n      1\n    ],\n    [\n      2,\n      1,\n      1\n    ],\n    [\n      1,\n      1,\n      1\n    ],\n    [\n      1,\n      1,\n      1\n    ]\n  ],\n  \"payouts\": [\n    {\n      \"award\": 1500,\n      \"symbols\": [\n        14,\n        14,\n        14\n      ],\n      \"min_bet\": 3,\n      \"max_bet\": 3,\n      \"flags\": 16,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 700,\n      \"symbols\": [\n        14,\n        14,\n        14\n      ],\n      \"min_bet\": 2,\n      \"max_bet\": 2,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 300,\n      \"symbols\": [\n        13,\n        13,\n        13\n      ],\n      \"min_bet\": 3,\n      \"max_bet\": 3,\n      \"flags\": 32,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 200,\n      \"symbols\": [\n        128,\n        128,\n        128\n      ],\n      \"min_bet\": 3,\n      \"max_bet\": 3,\n      \"flags\": 64,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 150,\n      \"symbols\": [\n        13,\n        13,\n        13\n      ],\n      \"min_bet\": 2,\n      \"max_bet\": 2,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 100,\n      \"symbols\": [\n        128,\n        128,\n        128\n      ],\n      \"min_bet\": 2,\n      \"max_bet\": 2,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 60,\n      \"symbols\": [\n        12,\n        12,\n        12\n      ],\n      \"min_bet\": 1,\n      \"max_bet\": 3,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 40,\n      \"symbols\": [\n        11,\n        11,\n        11\n      ],\n      \"min_bet\": 1,\n      \"max_bet\": 3,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 20,\n      \"symbols\": [\n        10,\n        10,\n        10\n      ],\n      \"min_bet\": 1,\n      \"max_bet\": 3,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 10,\n      \"symbols\": [\n        129,\n        129,\n        129\n      ],\n      \"min_bet\": 1,\n      \"max_bet\": 3,\n      \"flags\": 0,\n      \"line_mask\": 1\n    },\n    {\n      \"award\": 2,\n      \"symbols\": [\n        24,\n        24,\n        24\n      ],\n      \"min_bet\": 1,\n      \"max_bet\": 3,\n      \"flags\": 0,\n      \"line_mask\": 1\n    }\n  ]\n}\nlast_id: 0\nlast_operation: INFO\nlast_status: OK\npending: False\nactive: stock\ngeneration: 1\nprofile_crc: 00000000\nfault: False\n"
+    },
+    {
+      "id": "j88",
+      "source": "<job-log-dir>/j88.log",
+      "output": "{\"command\": \"game-spin\", \"reply\": {\"id\": 1, \"status\": \"ACCEPTED\"}}\n"
+    },
+    {
+      "id": "j89",
+      "source": "<job-log-dir>/j89.log",
+      "output": "{\"command\": \"extension-status\", \"reply\": {\"last_id\": 1, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 13\", \"reply\": {\"value\": 1013}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 49 00 00 15 63 00 00 10 15 00 00 60 00 00 00 01 84 00 00 00 25 00 00 00 15 00 00 00 10\", \"reply\": {\"coin_in\": 549, \"coin_out\": 1563, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 184, \"games_won\": 25, \"slot_door_opened\": 15, \"power_reset\": 10}}\n{\"command\": \"reel-stops\", \"code\": \"8F\", \"values\": [], \"data\": \"0b 06 07 ff ff ff ff ff ff\", \"reply\": {\"stops\": \"0b 06 07 ff ff ff ff ff ff\"}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 1, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n"
+    },
+    {
+      "id": "j90",
+      "source": "<job-log-dir>/j90.log",
+      "output": "{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 2, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n"
+    },
+    {
+      "id": "j91",
+      "source": "<job-log-dir>/j91.log",
+      "output": "{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 2, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 1, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 13\", \"reply\": {\"value\": 1013}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 49 00 00 15 63 00 00 10 15 00 00 60 00 00 00 01 84 00 00 00 25 00 00 00 16 00 00 00 11\", \"reply\": {\"coin_in\": 549, \"coin_out\": 1563, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 184, \"games_won\": 25, \"slot_door_opened\": 16, \"power_reset\": 11}}\n"
+    },
+    {
+      "id": "j92",
+      "source": "<job-log-dir>/j92.log",
+      "output": "{\"command\": \"game-spin\", \"reply\": {\"id\": 2, \"status\": \"ACCEPTED\"}}\n"
+    },
+    {
+      "id": "j93",
+      "source": "<job-log-dir>/j93.log",
+      "output": "{\"command\": \"extension-status\", \"reply\": {\"last_id\": 2, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 50 00 00 15 65 00 00 10 15 00 00 60 00 00 00 01 85 00 00 00 26 00 00 00 16 00 00 00 11\", \"reply\": {\"coin_in\": 550, \"coin_out\": 1565, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 185, \"games_won\": 26, \"slot_door_opened\": 16, \"power_reset\": 11}}\n{\"command\": \"reel-stops\", \"code\": \"8F\", \"values\": [], \"data\": \"00 00 00 ff ff ff ff ff ff\", \"reply\": {\"stops\": \"00 00 00 ff ff ff ff ff ff\"}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 2, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n"
+    },
+    {
+      "id": "j94",
+      "source": "<job-log-dir>/j94.log",
+      "output": "{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 3, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 2, \"last_operation\": \"BET_SPIN\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 1, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n"
+    },
+    {
+      "id": "j95",
+      "source": "<job-log-dir>/j95.log",
+      "output": "{\"command\": \"profile-upload\", \"error\": \"COMMIT_PROFILE id 9: outcome unknown (NoResponse: no reply from address 1); not repeated, check extension-status\", \"error_type\": \"UncertainOutcome\", \"id\": 9, \"status\": \"unknown\"}\n"
+    },
+    {
+      "id": "j96",
+      "source": "<job-log-dir>/j96.log",
+      "output": "{\"command\": \"extension-status\", \"reply\": {\"last_id\": 9, \"last_operation\": \"COMMIT_PROFILE\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"profile\", \"generation\": 2, \"profile_crc\": \"58E5D120\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n\nRead-only results: extension_status_exit=0 credits_exit=0\n"
+    },
+    {
+      "id": "j97",
+      "source": "<job-log-dir>/j97.log",
+      "output": "last_id: 9\nlast_operation: COMMIT_PROFILE\nlast_status: OK\npending: False\nactive: profile\ngeneration: 2\nprofile_crc: 58E5D120\nfault: False\nLive profile full encoded byte comparison: PASS\nBytes: 252 CRC32: 58E5D120 SHA256: c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477\n"
+    },
+    {
+      "id": "j98",
+      "source": "<job-log-dir>/j98.log",
+      "output": "{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 10, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n{\"command\": \"extension-status\", \"reply\": {\"last_id\": 9, \"last_operation\": \"COMMIT_PROFILE\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"profile\", \"generation\": 2, \"profile_crc\": \"58E5D120\", \"fault\": false}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 50 00 00 15 65 00 00 10 15 00 00 60 00 00 00 01 85 00 00 00 26 00 00 00 17 00 00 00 12\", \"reply\": {\"coin_in\": 550, \"coin_out\": 1565, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 185, \"games_won\": 26, \"slot_door_opened\": 17, \"power_reset\": 12}}\n"
+    },
+    {
+      "id": "j99",
+      "source": "<job-log-dir>/j99.log",
+      "output": "last_id: 9\nlast_operation: COMMIT_PROFILE\nlast_status: OK\npending: False\nactive: profile\ngeneration: 2\nprofile_crc: 58E5D120\nfault: False\nFull profile retention: PASS\nBytes: 252 CRC32: 58E5D120 SHA256: c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477\n"
+    },
+    {
+      "id": "j100",
+      "source": "<job-log-dir>/j100.log",
+      "output": "{\"command\": \"profile-restore\", \"error\": \"RESTORE_STOCK id 10: outcome unknown (NoResponse: no reply from address 1); not repeated, check extension-status\", \"error_type\": \"UncertainOutcome\", \"id\": 10, \"status\": \"unknown\"}\n"
+    },
+    {
+      "id": "j101",
+      "source": "<job-log-dir>/j101.log",
+      "output": "{\"command\": \"extension-status\", \"reply\": {\"last_id\": 10, \"last_operation\": \"RESTORE_STOCK\", \"last_status\": \"OK\", \"pending\": false, \"active\": \"stock\", \"generation\": 3, \"profile_crc\": \"00000000\", \"fault\": false}}\n{\"command\": \"extension-info\", \"reply\": {\"capabilities\": \"0x00000007\", \"supports\": [\"profile\", \"outcome\", \"spin\"], \"next_id\": 11, \"profile_size\": 252, \"max_chunk\": 62, \"max_lines\": 5, \"max_bet_per_line\": 3, \"max_total_bet\": 15, \"stops\": 22, \"max_award\": 1500}}\n{\"command\": \"credits\", \"code\": \"1A\", \"values\": [], \"data\": \"00 00 10 14\", \"reply\": {\"value\": 1014}}\n{\"command\": \"meters\", \"code\": \"1C\", \"values\": [], \"data\": \"00 00 05 50 00 00 15 65 00 00 10 15 00 00 60 00 00 00 01 85 00 00 00 26 00 00 00 17 00 00 00 12\", \"reply\": {\"coin_in\": 550, \"coin_out\": 1565, \"drop\": 1015, \"jackpot\": 6000, \"games_played\": 185, \"games_won\": 26, \"slot_door_opened\": 17, \"power_reset\": 12}}\n"
+    }
+  ]
+}

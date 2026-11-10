@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Run tools/sas.py on the Linux host with the USB-RS232 adapter, from this checkout.
+# The serial port cannot be forwarded over the network instead: SAS allows 5 ms between
+# bytes. tools/ and roms/ are mirrored there first, so ROM paths work the same on both ends.
+#
+#   tools/sas list
+#   tools/sas meters
+#   tools/sas rom-signature 0x1234 roms/s6000_main_S6M00002B5.bin roms/personality_E595211X-05.bin
+#   tools/sas profile-preview my.json          list, help and offline profile commands run here
+#   tools/sas profile-upload my.json           the local file is copied over for the upload
+#   tools/sas profile-download > active.json   the profile arrives on stdout
+#   tools/sas commission-capture original.json  archive on this Mac, never overwrite
+#   tools/sas commission-initialize original.json --first-install
+#                                             separate explicit pre-boot operation
+#
+# Every other command needs SAS_HOST (the SSH destination, such as user@sas-host) and
+# SAS_PORT (the adapter's serial device on that host, such as /dev/ttyUSB0). SAS_DIR is where
+# the mirror lives there, relative to the login directory unless absolute; default blazing-7s.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+upload=upload/profile.json  # where an uploaded profile lands, relative to $dir
+
+# The command is the first value that is not an option; options that take a value skip it.
+command="" first_value=-1
+args=("$@")
+i=0
+while [ "$i" -lt $# ]; do
+    case ${args[$i]} in
+        --port | --address | --id) i=$((i + 1)) ;;
+        -*) ;;
+        *) if [ -z "$command" ]; then command=${args[$i]}
+           elif [ "$first_value" -lt 0 ]; then first_value=$i; fi ;;
+    esac
+    i=$((i + 1))
+done
+
+case $command in
+    "" | list | help | profile-stock | profile-preview)  # offline; a FILE is a path on this machine
+        exec python3 "$repo/tools/sas.py" "$@" ;;
+esac
+
+if [ -z "${SAS_HOST:-}" ] || [ -z "${SAS_PORT:-}" ]; then
+    echo "$command: set SAS_HOST (user@host running the serial adapter) and SAS_PORT (its serial device)" >&2
+    exit 2
+fi
+host=$SAS_HOST
+port=$SAS_PORT
+dir=${SAS_DIR:-blazing-7s}
+
+commission="" local_archive=""
+case $command in
+    commission-info | commission-capture | commission-initialize)
+        commission=1
+        if [ "$command" != commission-info ]; then
+            if [ "$first_value" -lt 0 ]; then
+                echo "$command: a local archive path is required" >&2
+                exit 2
+            fi
+            local_archive=${args[$first_value]}
+            case $local_archive in /*) ;; *) local_archive="$PWD/$local_archive" ;; esac
+            args=("${args[@]:0:$first_value}" "${args[@]:$((first_value + 1))}")
+            if [ "$command" = commission-capture ] && { [ -e "$local_archive" ] || [ -L "$local_archive" ]; }; then
+                echo "$command: archive already exists: $local_archive" >&2
+                exit 2
+            fi
+            if [ "$command" = commission-initialize ]; then
+                first_install=""
+                for arg in "${args[@]}"; do
+                    [ "$arg" != --first-install ] || first_install=1
+                done
+                if [ -z "$first_install" ]; then
+                    echo "$command: --first-install is required" >&2
+                    exit 2
+                fi
+            fi
+        fi ;;
+esac
+
+local_profile=""
+if [ "$command" = profile-upload ] && [ "$first_value" -ge 0 ]; then
+    local_profile=${args[$first_value]}
+    case $local_profile in /*) ;; *) local_profile="$PWD/$local_profile" ;; esac
+    if [ ! -f "$local_profile" ]; then
+        echo "profile-upload: no file $local_profile" >&2
+        exit 2
+    fi
+    args[first_value]=$upload
+fi
+
+# One SSH connection for the sync and the run.
+control="$HOME/.ssh/sas-%r@%h:%p"
+ssh_opts=(-o BatchMode=yes -o ControlMaster=auto -o "ControlPath=$control" -o ControlPersist=60)
+
+cd "$repo"
+# shellcheck disable=SC2029  # the remote command is built here, on purpose
+ssh "${ssh_opts[@]}" "$host" "mkdir -p '$dir/$(dirname "$upload")' && { test -d '$dir/vendor/serial' ||
+    python3 -m pip install --quiet --target '$dir/vendor' pyserial; }"
+rsync -qR -e "ssh ${ssh_opts[*]}" tools/sas*.py tools/serial_*.py roms/*.bin "$host:$dir/"
+if [ -n "$local_profile" ]; then
+    rsync -q -e "ssh ${ssh_opts[*]}" "$local_profile" "$host:$dir/$upload"
+fi
+
+quoted=""
+[ $# -gt 0 ] && quoted=$(printf '%q ' "${args[@]}")
+if [ -n "$commission" ]; then
+    remote="cd '$dir' && PYTHONPATH=vendor exec python3 tools/sas_commission.py --port '$port' $quoted"
+    # shellcheck disable=SC2029  # $remote is built here, on purpose
+    case $command in
+        commission-capture)
+            ssh "${ssh_opts[@]}" "$host" "$remote" | \
+                python3 "$repo/tools/sas_commission.py" archive-save "$local_archive" ;;
+        commission-initialize)
+            python3 "$repo/tools/sas_commission.py" archive-verify "$local_archive" | \
+                ssh "${ssh_opts[@]}" "$host" "$remote" ;;
+        commission-info)
+            ssh "${ssh_opts[@]}" "$host" "$remote" ;;
+    esac
+    exit $?
+fi
+
+tty=()
+[ -t 0 ] && [ -t 1 ] && tty=(-t)  # so Ctrl-C reaches `poll`
+exec ssh "${ssh_opts[@]}" ${tty[@]+"${tty[@]}"} "$host" \
+    "cd '$dir' && PYTHONPATH=vendor exec python3 tools/sas.py --port '$port' $quoted"

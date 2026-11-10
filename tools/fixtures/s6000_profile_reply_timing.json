@@ -1,0 +1,89 @@
+{
+ "description": "Live E0 exchanges of the first profile upload and stock restore whose replies were observed in full: each request as sent, the reply bytes received and when its first and last byte arrived. Single observations on one machine, not upper bounds.",
+ "arrival_ms": "the probe's after_wait_ms of the reply's first and last received chunk: milliseconds since its receive wait began after the request was sent",
+ "evidence": "notes/firmware-bringup.md, \"Measured profile reply latency\"",
+ "upload": {
+  "source": {
+   "job": "j103",
+   "log": "j103.log",
+   "log_sha256": "8703f9597220bc15508a5cb8a804f9c4dce7a10de4a1605c0292ece382efcd0b",
+   "policy": "No retransmission, spins or transfers; stop on any uncertainty.",
+   "receive_window_s": 2.0,
+   "host_timeout_s": 0.25,
+   "profile_crc": "58E5D120",
+   "profile_sha256": "c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477"
+  },
+  "exchanges": [
+   {"sequence": 6, "operation": "INFO", "request_id": 0, "tx": "01e00e53365245010000000000000000007b4e", "rx": "01e026533652450100000000000000000000070000000b00000000000000fc003e05030f16dc0500003417", "first_byte_ms": 3.41482, "last_byte_ms": 43.323302},
+   {"sequence": 7, "operation": "BEGIN_PROFILE", "request_id": 11, "tx": "01e0145336524501100b00000000000000fc0020d1e55866d7", "rx": "01e00f533652450110000b000000000000003436", "first_byte_ms": 23.906406, "last_byte_ms": 50.318439},
+   {"sequence": 8, "operation": "PROFILE_CHUNK", "request_id": 12, "tx": "01e04e5336524501110c000000000000000000533650460101030b010102020201010102020102010101010201020301010203020302010101010101010103010102020101010102030301020101010201dc0a", "rx": "01e00f533652450111000c000000000000001d86", "first_byte_ms": 27.579705, "last_byte_ms": 54.385393},
+   {"sequence": 9, "operation": "PROFILE_CHUNK", "request_id": 13, "tx": "01e04e5336524501110d000000000000003e000201010201010101010101010000000005dc0e0e0e242403031001030000000002bc0e0e0e2424020200010301000000012c0d0d0d242403032001030200c7b6", "rx": "01e00f533652450111000d00000000000000a207", "first_byte_ms": 27.452171, "last_byte_ms": 53.233672},
+   {"sequence": 10, "operation": "PROFILE_CHUNK", "request_id": 14, "tx": "01e04e5336524501110e000000000000007c00000000c8808080242403034001030300000000960d0d0d242402020001030400000000648080802424020200010305000000003c0c0c0c242403010001031b16", "rx": "01e00f533652450111000e00000000000000728d", "first_byte_ms": 26.993026, "last_byte_ms": 53.366107},
+   {"sequence": 11, "operation": "PROFILE_CHUNK", "request_id": 15, "tx": "01e04e5336524501110f00000000000000ba000600000000280b0b0b242403010001030700000000140a0a0a2424030100010308000000000a8181812424030100010309000000000218181824240301004adb", "rx": "01e00f533652450111000f00000000000000cd0c", "first_byte_ms": 26.317986, "last_byte_ms": 52.221458},
+   {"sequence": 12, "operation": "PROFILE_CHUNK", "request_id": 16, "tx": "01e0145336524501111000000000000000f80001030a00a928", "rx": "01e00f53365245011100100000000000000007e6", "first_byte_ms": 24.403702, "last_byte_ms": 51.213693},
+   {"sequence": 13, "operation": "COMMIT_PROFILE", "request_id": 17, "tx": "01e00e5336524501121100000000000000d2f0", "rx": "01e00f533652450112001100000000000000d113", "first_byte_ms": 436.322878, "last_byte_ms": 462.230631},
+   {"sequence": 14, "operation": "STATUS", "request_id": 0, "tx": "01e00e53365245010100000000000000008603", "rx": "01e02353365245010100000000000000000011000000000000001200010400000020d1e55800c23d", "first_byte_ms": 4.070757, "last_byte_ms": 42.294388},
+   {"sequence": 15, "operation": "READ_PROFILE", "request_id": 0, "tx": "01e0115336524501020000000000000000000040e0c6", "rx": "01e04f533652450102000000000000000000533650460101030b010102020201010102020102010101010201020301010203020302010101010101010103010102020101010102030301020101010201020133ae", "first_byte_ms": 4.962334, "last_byte_ms": 68.193622},
+   {"sequence": 16, "operation": "READ_PROFILE", "request_id": 0, "tx": "01e011533652450102000000000000000040004096c0", "rx": "01e04f533652450102000000000000000000010201010101010101010000000005dc0e0e0e242403031001030000000002bc0e0e0e2424020200010301000000012c0d0d0d242403032001030200000000c8a244", "first_byte_ms": 4.503374, "last_byte_ms": 68.164225},
+   {"sequence": 17, "operation": "READ_PROFILE", "request_id": 0, "tx": "01e01153365245010200000000000000008000400cca", "rx": "01e04f533652450102000000000000000000808080242403034001030300000000960d0d0d242402020001030400000000648080802424020200010305000000003c0c0c0c242403010001030600000000283053", "first_byte_ms": 6.45752, "last_byte_ms": 70.172077},
+   {"sequence": 18, "operation": "READ_PROFILE", "request_id": 0, "tx": "01e0115336524501020000000000000000c0003c9175", "rx": "01e04b5336524501020000000000000000000b0b0b242403010001030700000000140a0a0a2424030100010308000000000a81818124240301000103090000000002181818242403010001030a00aa0f", "first_byte_ms": 6.002244, "last_byte_ms": 67.221297},
+   {"sequence": 19, "operation": "STATUS", "request_id": 0, "tx": "01e00e53365245010100000000000000008603", "rx": "01e02353365245010100000000000000000011000000000000001200010400000020d1e55800c23d", "first_byte_ms": 5.705125, "last_byte_ms": 43.079262}
+  ],
+  "verified": {
+   "result": {
+    "generation": 4,
+    "id": 17,
+    "profile_crc": "58E5D120",
+    "status": "OK"
+   },
+   "status": {
+    "active": "profile",
+    "fault": false,
+    "generation": 4,
+    "last_id": 17,
+    "last_operation": "COMMIT_PROFILE",
+    "last_status": "OK",
+    "pending": false,
+    "profile_crc": "58E5D120"
+   },
+   "next_id": 18,
+   "credits": 1014
+  }
+ },
+ "restore": {
+  "source": {
+   "job": "j104",
+   "log": "j104.log",
+   "log_sha256": "f7c5006cef3a17813325c9f4368e774d46fc5f68dc452f8a70bb80d4e537f9a5",
+   "policy": "No retransmission, spins or transfers; stop on any uncertainty.",
+   "receive_window_s": 2.0,
+   "host_timeout_s": 0.25,
+   "profile_crc": "58E5D120",
+   "profile_sha256": "c402b2b7a10d3ccd0e69b5946198ab6e68e519357f34022e321f3eb7e1e4b477"
+  },
+  "exchanges": [
+   {"sequence": 13, "operation": "INFO", "request_id": 0, "tx": "01e00e53365245010000000000000000007b4e", "rx": "01e026533652450100000000000000000000070000001200000000000000fc003e05030f16dc0500007842", "first_byte_ms": 4.052455, "last_byte_ms": 43.478324},
+   {"sequence": 14, "operation": "RESTORE_STOCK", "request_id": 18, "tx": "01e00e5336524501131200000000000000ff37", "rx": "01e00f53365245011300120000000000000026b5", "first_byte_ms": 320.32673, "last_byte_ms": 346.423004},
+   {"sequence": 15, "operation": "STATUS", "request_id": 0, "tx": "01e00e53365245010100000000000000008603", "rx": "01e0235336524501010000000000000000001200000000000000130000050000000000000000df19", "first_byte_ms": 2.550485, "last_byte_ms": 40.448245}
+  ],
+  "verified": {
+   "result": {
+    "generation": 5,
+    "id": 18,
+    "status": "OK"
+   },
+   "status": {
+    "active": "stock",
+    "fault": false,
+    "generation": 5,
+    "last_id": 18,
+    "last_operation": "RESTORE_STOCK",
+    "last_status": "OK",
+    "pending": false,
+    "profile_crc": "00000000"
+   },
+   "next_id": 19,
+   "credits": 1014
+  }
+ }
+}

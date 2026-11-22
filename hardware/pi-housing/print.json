@@ -1,0 +1,12 @@
+{
+  "name": "pi4-housing",
+  "printer": "Bambu Lab P1S 0.4 nozzle",
+  "process": "0.20mm Standard @BBL X1C",
+  "plate": "Textured PEI Plate",
+  "filaments": [{"preset": "Generic PLA", "colour": "#3A3F47"}],
+  "settings": {"wall_loops": 3, "wall_generator": "arachne", "infill_wall_overlap": "30%"},
+  "parts": [
+    {"path": "stl/base.stl", "filament": 1},
+    {"path": "stl/lid.stl", "filament": 1}
+  ]
+}

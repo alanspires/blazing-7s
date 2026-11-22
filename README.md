@@ -144,6 +144,13 @@ To run the tests, build the firmware or connect to your own machine, see
   they decode. What they cover and how to run them:
   `GETTING-STARTED.md`, **What the tests cover**.
 
+### Hardware
+
+- `hardware/pi-housing/` a 3D-printable two-part housing for the Raspberry Pi 4 Model B
+  that is to take over as the SAS host inside the cabinet: the parametric model, the
+  part STLs and a Bambu Studio project for a P1S in PLA
+  (`hardware/pi-housing/README.md`). Designed and sliced, not yet printed.
+
 ### Reference material and analysis
 
 - `photos/` seven photos of the machine (JPEG, 1600 px on the long side, metadata

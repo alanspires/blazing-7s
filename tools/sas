@@ -94,7 +94,9 @@ ssh_opts=(-o BatchMode=yes -o ControlMaster=auto -o "ControlPath=$control" -o Co
 
 cd "$repo"
 # shellcheck disable=SC2029  # the remote command is built here, on purpose
+# A host whose python3 already has pyserial (such as a distribution package) needs no pip.
 ssh "${ssh_opts[@]}" "$host" "mkdir -p '$dir/$(dirname "$upload")' && { test -d '$dir/vendor/serial' ||
+    python3 -c 'import serial' 2>/dev/null ||
     python3 -m pip install --quiet --target '$dir/vendor' pyserial; }"
 rsync -qR -e "ssh ${ssh_opts[*]}" tools/sas*.py tools/serial_*.py roms/*.bin "$host:$dir/"
 if [ -n "$local_profile" ]; then

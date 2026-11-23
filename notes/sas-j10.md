@@ -143,7 +143,8 @@ can collide, and changing its seed does not provide an independent integrity che
 
 `tools/sas` runs from a checkout on another computer (macOS or Linux) and reaches the
 SAS host over SSH. Each online command mirrors `tools/` and `roms/` there with rsync,
-installs pyserial into the mirror once (`pip install --target`), and runs `sas.py`
+installs pyserial into the mirror once (`pip install --target`) unless the host's
+`python3` already imports it (a distribution package such as `python3-serial`), and runs `sas.py`
 remotely. It needs:
 
 - passwordless SSH to the SAS host (the wrapper uses `BatchMode=yes`, so a password

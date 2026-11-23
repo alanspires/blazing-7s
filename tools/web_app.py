@@ -8,11 +8,16 @@ Rendering is web_views'; the routes are:
     GET  /, /odds, /activity, /settings   a whole page for the URL's view
     GET  /events?page=...                 Server-Sent Events: {"regions": {id: html}}, the
                                           whole set first, then the regions each newer
-                                          snapshot changed, and a keepalive comment
+                                          snapshot changed; a keepalive comment with a
+                                          "heartbeat" event {"deadline": seconds} at the
+                                          start and whenever the stream has been quiet for
+                                          the keepalive period
     GET  /regions?page=...                the whole region set as JSON, for pages /events
-                                          turned away over its subscriber cap
+                                          turned away over its subscriber cap, and for the
+                                          Add credits sheet at the amount being typed
     GET  /state.json                      web_state.public_view, for scripts
-    GET  /static/<path>                   the design's stylesheets, fonts, icons and live.js
+    GET  /static/<path>                   the design's stylesheets, fonts, icons and live.js,
+                                          and the licence and source notices beside them
     POST /actions/preview                 the odds editor regions a draft changes; sends nothing
     POST /actions/<Act value>             submit an action under a new submission ID
 
@@ -33,6 +38,7 @@ connection gets 503 and no thread), and so, separately, are event streams.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
 import socketserver
@@ -51,15 +57,21 @@ import web_views as wv
 from web_state import Act, Code
 
 STATIC_ROOT = Path(__file__).resolve().parent / "web" / "static"
+# The notices (.md, .txt) ship with the fonts and icons they cover: the URW font's licence
+# requires its source directions beside the served file. Plain text, so a browser shows them.
 CONTENT_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-                 ".svg": "image/svg+xml", ".woff2": "font/woff2"}
+                 ".svg": "image/svg+xml", ".woff2": "font/woff2",
+                 ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8"}
 ACTIONS = "/actions/"
 PREVIEW = "preview"
 
 MAX_HANDLERS = 64  # concurrent connections with a handler thread
 MAX_SUBSCRIBERS = 32  # open event streams, fewer than the handlers so pages still load
 SOCKET_TIMEOUT = 20.0  # seconds any one read or write on a connection may block
-KEEPALIVE = 15.0  # seconds without a write before an event stream sends a comment
+KEEPALIVE = 15.0  # seconds without a write before an event stream sends a heartbeat
+# A page counts its stream lost after this many keepalive periods without a message, so one
+# late heartbeat never trips it; the heartbeat tells the page the resulting deadline.
+HEARTBEAT_PERIODS = 2
 # Each stream's kernel send buffer: bounds what a client that stops reading pins, and makes
 # its writes block, and time out, after that much rather than after the system maximum.
 SSE_SEND_BUFFER = 64 * 1024
@@ -95,7 +107,7 @@ class Server(ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         self.worker = worker
         self.journal = journal
-        self.allowed = frozenset(name.lower() for name in (address[0], *allow_hosts))
+        self.allowed = frozenset(_host_name(name) for name in (address[0], *allow_hosts))
         self.socket_timeout = socket_timeout
         self.keepalive = keepalive
         self.log = log
@@ -256,6 +268,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self._event(shown)
+            self._heartbeat()
             written = time.monotonic()
             while True:
                 state = subscription.wait(max(written + server.keepalive - time.monotonic(), 0.0))
@@ -270,14 +283,24 @@ class Handler(BaseHTTPRequestHandler):
                         shown = regions
                         written = time.monotonic()
                 if time.monotonic() - written >= server.keepalive:
-                    self.wfile.write(b": keepalive\n\n")
+                    self._heartbeat()
                     written = time.monotonic()
         finally:
             server.remove_stream(self.connection)
             server.subscribers.release()
 
     def _event(self, regions: Mapping[str, str]) -> None:
-        self.wfile.write(b"data: " + json.dumps({"regions": regions}, separators=(",", ":")).encode() + b"\n\n")
+        self._frame(b"data: " + json.dumps({"regions": regions}, separators=(",", ":")).encode() + b"\n\n")
+
+    def _heartbeat(self) -> None:
+        # A keepalive comment and an event in one frame: EventSource never hands comments to
+        # the page, which needs to see the stream is alive to notice a connection lost without
+        # a close (decision-1 r3).
+        deadline = self.server.keepalive * HEARTBEAT_PERIODS
+        self._frame(b": keepalive\nevent: heartbeat\ndata: " + json.dumps({"deadline": deadline}).encode() + b"\n\n")
+
+    def _frame(self, frame: bytes) -> None:
+        self.wfile.write(frame)
 
     def _action(self, route: str, fields: Mapping[str, str]) -> None:
         worker = self.server.worker
@@ -403,9 +426,18 @@ class Handler(BaseHTTPRequestHandler):
 _ROUTES = frozenset(act.value for act in Act)
 
 
+def _host_name(text: str) -> str:
+    """A host as compared: an IP literal in its canonical spelling (browsers compress IPv6
+    addresses, so "[0:0::1]" arrives as "[::1]"), any other name in lower case."""
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        return text.lower()
+
+
 def _authority(text: str) -> tuple[str, int] | None:
-    """The lower-case host name and port an authority ("name:port", "[v6]:port") names, port
-    80 when it gives none; None for anything else."""
+    """The host (as _host_name compares it) and port an authority ("name:port", "[v6]:port")
+    names, port 80 when it gives none; None for anything else."""
     parts = urlsplit("//" + text)
     try:
         port = parts.port
@@ -413,4 +445,4 @@ def _authority(text: str) -> tuple[str, int] | None:
         return None
     if not parts.hostname or parts.username is not None or parts.path or parts.query or parts.fragment:
         return None
-    return parts.hostname, 80 if port is None else port
+    return _host_name(parts.hostname), 80 if port is None else port

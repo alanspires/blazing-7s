@@ -42,7 +42,8 @@ The journal records the worker writes are the contract the views read (web_views
 generation, evidence, code}, where `result` is the value of the `web_state.OutcomeWord` the
 action's result carries, spin {bet_per_line,
 total_bet, stops, paid, credits, games, name}, event {code, event, door, name, arm},
-profile {change, generation, returns} and page {event, cause}.
+profile {intent, change, generation, returns} and page {event, cause}. A verified apply or
+restore journals its profile record, naming its intent, before that intent's outcome.
 """
 
 from __future__ import annotations
@@ -228,9 +229,10 @@ class _Invalidated(Exception):
 class _Open:
     """An intent with no durable outcome yet: the journal record and an upload's steps."""
 
-    def __init__(self, record: dict, steps: list[dict]):
+    def __init__(self, record: dict, steps: list[dict], *, profile_told: bool = False):
         self.record = record
         self.steps = steps
+        self.profile_told = profile_told  # its verified profile change's record is journaled or queued
         self.act = OP_ACTS[record["op"]]
         self.family = ws.FAMILIES.get(self.act)
         self.inconsistent = False  # re-checked only at start-up and reconnect
@@ -310,7 +312,7 @@ class Worker:
         self._boundary_needed = Setting.UNKNOWN.value in settings.values()
         self._state = self._initial_state(settings)
         for intent in journal.open_intents():
-            entry = _Open(intent.record, list(intent.steps))
+            entry = _Open(intent.record, list(intent.steps), profile_told=intent.profile is not None)
             self._open[entry.seq] = entry
             self._hold(entry, CHECKING)
             if entry.submission_id:
@@ -498,7 +500,7 @@ class Worker:
         was = self._state.link
         self._replying = False
         self._need_recovery()
-        self._update(link=Link.OFFLINE, fresh=False, doors=None)
+        self._update(link=Link.OFFLINE, fresh=False, doors=None, game_running=False)
         if was is not Link.OFFLINE:
             self._save({"kind": "page", "source": "page", "event": "machine_lost", "cause": cause})
 
@@ -546,7 +548,10 @@ class Worker:
             self._disturbances += 1
         if code == GAME_ENDED:
             self._needs.add("game")  # journaled as the game's spin record
+            self._update(game_running=False)
             return
+        if code == GAME_STARTED:
+            self._update(game_running=True)  # a game at the machine shows from its start (R2)
         event = {"kind": "event", "source": "machine", "code": code}
         if code in DOORS:
             door, is_open = DOORS[code]
@@ -562,7 +567,7 @@ class Worker:
             event.update(event="exception", name=EXCEPTIONS.get(code, "Unknown exception"))
         if code == POWER_APPLIED:
             self._need_recovery()
-            self._update(fresh=False, doors=None)
+            self._update(fresh=False, doors=None, game_running=False)
         if code in MONEY_EVENTS:
             self._needs.add("money")
         self._save(event)
@@ -804,7 +809,13 @@ class Worker:
             else:
                 entry = self._open[self._current]
                 reason = f"The machine refused it ({e.status.name})"
-                self._close(entry, OutcomeWord.REFUSED, {"code": e.status.name}, reason=reason)
+                if action.name is Act.RESTORE_STOCK:
+                    # A refusal other than ws.UNCHANGED_REFUSALS can follow a partial profile
+                    # transition: STATUS, read next, says which game is active.
+                    self._profile_status = None
+                    self._needs.add("status")
+                self._close(entry, OutcomeWord.REFUSED, {"code": e.status.name}, reason=reason,
+                            machine_status=e.status)
         except _READ_ERRORS as e:
             if self._current is None:
                 self._set_result(_refused(action, Refusal(Code.STALE, f"Could not read the machine: {e}",
@@ -871,9 +882,8 @@ class Worker:
             self._apply_profile(action)
         elif name is Act.RESTORE_STOCK:
             reply = se.restore(self._ext, record=self._recorder(action))
-            self._profile_changed(reply["generation"], False, sp.stock_profile())
-            self._close(self._open[self._current], OutcomeWord.RESTORED, {"generation": reply["generation"]})
-            self._save_profile("restored", reply["generation"], sp.stock_profile())
+            self._profile_verified(self._open[self._current], OutcomeWord.RESTORED, reply["generation"],
+                                   False, sp.stock_profile())
         elif name is Act.PLAY:
             result = sm.set_play(self._host, bool(action.params["on"]), record=self._recorder(action),
                                  pace=self._pace)
@@ -946,13 +956,18 @@ class Worker:
         entry = self._open[self._current]
         word = OutcomeWord(outcome.status)
         fields = {"code": outcome.code, "deltas": outcome.deltas}
+        result = _deltas(outcome.deltas)
         if word is OutcomeWord.MOVED:
             fields["transfer"] = self._transfer_field(entry.record)
+            result["transfer_credits"] = fields["transfer"]["credits"]
         self._update(credits=entry.record["baseline"]["credits"] + outcome.deltas["credits"])
-        self._close(entry, word, fields, **_deltas(outcome.deltas))
+        self._close(entry, word, fields, **result)
         self._needs.add("money")
 
     def _transfer_field(self, intent: dict) -> dict:
+        """A completed transfer's direction and amount. Only called once the in-house meters
+        moved by exactly the intent's cents (moved, happened), so the amount is verified; the
+        credits meter is not, since play at the machine can move it too."""
         cpc = self._state.cents_per_credit or 1
         return {"direction": "in" if intent["op"] == sm.OP_DEPOSIT else "out", "credits": intent["cents"] // cpc}
 
@@ -985,19 +1000,28 @@ class Worker:
         self._update(ext_status=replace(status, last_id=reply["id"], last_op=se.Op.COMMIT_PROFILE,
                                         last_status=se.Status.OK, active=True, generation=reply["generation"],
                                         profile_crc=int(reply["profile_crc"], 16)))
-        self._profile_changed(reply["generation"], True, profile)
-        self._close(entry, OutcomeWord.COMMITTED_VERIFIED, {"generation": reply["generation"]})
-        self._save_profile("applied", reply["generation"], profile)
+        self._profile_verified(entry, OutcomeWord.COMMITTED_VERIFIED, reply["generation"], True, profile)
+
+    def _profile_verified(self, entry: _Open, word: OutcomeWord, generation: int, custom: bool,
+                          profile: sp.Profile, *, reason: str | None = None) -> None:
+        """Close a verified apply or restore, acknowledged or reconciled, with the same records:
+        the profile record that Activity shows, naming the intent, goes to the journal before
+        the outcome, so a restart between the two finds it on the open intent and Activity
+        tells the change once."""
+        self._profile_changed(generation, custom, profile)
+        if not entry.profile_told:
+            entry.profile_told = True
+            returns = {str(row.bet_per_line): round(float(row.nominal_return) * 100, 4)
+                       for row in sp.preview(profile)}
+            self._save({"kind": "profile", "source": "page", "intent": entry.seq,
+                        "change": "applied" if custom else "restored", "generation": generation,
+                        "returns": returns})
+        self._close(entry, word, {"generation": generation}, reason=reason, generation=generation)
 
     def _profile_changed(self, generation: int, custom: bool, profile: sp.Profile) -> None:
         self._profile_status = None  # read it again under the next STATUS
         self._update(profile=ws.ProfileState(custom, generation, profile))
         self._needs.add("status")
-
-    def _save_profile(self, change: str, generation: int, profile: sp.Profile) -> None:
-        returns = {str(row.bet_per_line): round(float(row.nominal_return) * 100, 4) for row in sp.preview(profile)}
-        self._save({"kind": "profile", "source": "page", "change": change, "generation": generation,
-                    "returns": returns})
 
     def _after_mutation(self, reply: dict, op: se.Op) -> None:
         """What the reply showed, until the next STATUS read confirms it."""
@@ -1130,9 +1154,11 @@ class Worker:
             return
         deltas = found.evidence["deltas"]
         fields = {"deltas": deltas}
+        result = _deltas(deltas)
         if found.result == sm.HAPPENED:
             fields["transfer"] = self._transfer_field(entry.record)
-        self._close(entry, OutcomeWord(found.result), fields, **_deltas(deltas))
+            result["transfer_credits"] = fields["transfer"]["credits"]
+        self._close(entry, OutcomeWord(found.result), fields, **result)
         self._needs.add("money")
 
     def _reconciled_upload(self, entry: _Open, found: sm.Reconciled, reason: str | None) -> None:
@@ -1142,6 +1168,11 @@ class Worker:
         if found.result == sm.INCONSISTENT:
             self._inconsistent(entry)
             return
+        if found.result == sm.COMMITTED_VERIFIED:
+            profile = sp.decode(bytes.fromhex(entry.record["profile_hex"]))  # the bytes the read-back equalled
+            self._profile_verified(entry, OutcomeWord.COMMITTED_VERIFIED, found.evidence["status"]["generation"],
+                                   True, profile, reason=reason)
+            return
         self._profile_status = None
         self._needs.add("status")
         self._close(entry, OutcomeWord(found.result), reason=reason)
@@ -1149,9 +1180,15 @@ class Worker:
     def _reconciled_extension(self, entry: _Open, found: sm.Reconciled) -> None:
         if found.result == sm.PENDING:
             self._hold(entry, CHECKING)
+            if "status" in found.evidence:
+                self._needs.add("status")  # what it read, a fault included, shows while it waits
             return
         if found.result == sm.INCONSISTENT:
             self._inconsistent(entry)
+            return
+        if found.result == sm.RESTORED:
+            self._profile_verified(entry, OutcomeWord.RESTORED, found.evidence["status"]["generation"],
+                                   False, sp.stock_profile())
             return
         op = se.Op[entry.record["op"]]
         self._needs.add("status")
@@ -1178,7 +1215,7 @@ class Worker:
             fields["arm"] = dict(NO_ARM)
             self._set_arm(fields["arm"])
         elif op == se.Op.RESTORE_STOCK:
-            self._profile_status = None
+            self._profile_status = None  # interrupted, fault or nothing changed: read what is active
         self._close(entry, OutcomeWord(found.result), fields)
 
     def _inconsistent(self, entry: _Open) -> None:
@@ -1227,7 +1264,7 @@ class Worker:
             try:
                 stored = self._journal.append(later.record)
             except _JOURNAL_ERRORS as e:
-                self._not_saved(later, e)
+                self._not_saved(e)
                 return
             self._later.pop(0)
             self._appended(stored)
@@ -1237,14 +1274,16 @@ class Worker:
             if later.result is not None:
                 self._set_result(later.result)
 
-    def _not_saved(self, later: _Later, error: BaseException) -> None:
+    def _not_saved(self, error: BaseException) -> None:
         """After a possible send, a failed append is never 'done' and never 'nothing sent':
-        the family stays held until the record is durable."""
+        every record still queued waits behind it, so each one's family stays held until it
+        is durable (a profile record goes before its intent's outcome)."""
         reason = f"Could not save to the log ({type(error).__name__}: {error}); checking"
-        if later.entry is not None:
-            self._hold(later.entry, reason)
-        if later.result is not None:
-            self._set_result(replace(later.result, state=ResultState.CHECKING, reason=reason))
+        for later in self._later:
+            if later.entry is not None:
+                self._hold(later.entry, reason)
+            if later.result is not None:
+                self._set_result(replace(later.result, state=ResultState.CHECKING, reason=reason))
         self._next_refresh = min(self._next_refresh, self._clock() + REFRESH_INTERVAL)
 
     def _appended(self, stored: dict) -> None:

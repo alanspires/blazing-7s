@@ -3,8 +3,11 @@
    pinned to the bottom edge, meters and activity in a pull-up sheet. From 720px it is
    a centred device panel beside a quiet side panel. Tool pages widen at 640px and 1024px. */
 
-/* The system's faces, shipped with the page (Latin sets; fonts/README.md) so phones
-   and browsers without them installed show the intended type. */
+/* The system's faces, shipped with the page (Latin sets) so phones and browsers without
+   them installed show the intended type. They are third-party fonts under their own
+   licences, served beside them: fonts/README.md gives each file's source, version and
+   changes, and URW Gothic's Corresponding Source; fonts/OFL.txt (Lato),
+   fonts/LICENSE-URW-base35.txt and fonts/COPYING-AGPL-3.0.txt (URW Gothic). */
 @font-face {
   font-family: "Lato";
   font-weight: 400;

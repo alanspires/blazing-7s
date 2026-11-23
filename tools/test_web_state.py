@@ -155,6 +155,13 @@ class AdmitTest(unittest.TestCase):
             self.assertEqual(code(busy, name), Code.BUSY)
         self.assertIsNone(code(busy, Act.ADD_CREDITS, amount=10))
 
+    def test_a_game_started_at_the_machine_holds_play_and_cash_out_like_a_page_spin(self):
+        running = online(game_running=True)
+        for name in (Act.SPIN, Act.BET_ONE, Act.MAX_BET, Act.CASH_OUT, Act.APPLY_PROFILE):
+            with self.subTest(name):
+                self.assertEqual(code(running, name), Code.BUSY)
+        self.assertIsNone(code(running, Act.ADD_CREDITS, amount=10))
+
     def test_doors_block_play_only_once_known_open(self):
         self.assertIsNone(code(online(doors=None), Act.SPIN))  # no baseline: unknown, not open
         self.assertIsNone(code(online(doors={DOOR: False}), Act.SPIN))
@@ -264,6 +271,23 @@ class PublicViewTest(unittest.TestCase):
         self.assertEqual(results["spin-1"]["outcome"], OutcomeWord.PLAYED.value)
         self.assertEqual(results["spin-1"]["evidence"]["total_wager"], evidence.total_wager)
         self.assertEqual(results["spin-1"]["evidence"]["games_played_delta"], 1)
+
+    def test_a_pending_restore_exposes_the_machines_fault_while_its_hold_stays(self):
+        pending = se.MachineStatus(NEXT_ID, se.Op.RESTORE_STOCK, se.Status.ACCEPTED, True, GENERATION, 0, True)
+        held = MappingProxyType({Family.EXTENSION: Hold("checking", 5)})
+        state = online(ext_status=pending, checking=held)
+        view = json.loads(json.dumps(ws.public_view(state)))
+        self.assertIs(view["extension_fault"], True)
+        self.assertEqual(view["checking"][Family.EXTENSION.value]["intent_seq"], 5)  # still pending
+        self.assertIs(ws.public_view(online(checking=held))["extension_fault"], False)
+
+    def test_a_machine_refusal_carries_the_extensions_own_status(self):
+        refused = ActionResult("restore-1", Act.RESTORE_STOCK, ResultState.DONE, OutcomeWord.REFUSED,
+                               machine_status=se.Status.FAULT)
+        view = ws.public_view(ws.with_result(online(), refused))
+        self.assertEqual(view["results"][0]["machine_status"], se.Status.FAULT.name)
+        self.assertFalse(ws.changed_nothing(refused))  # a FAULT can follow a partial transition
+        self.assertTrue(ws.changed_nothing(replace(refused, machine_status=se.Status.BUSY)))
 
     def test_refused_spin_shows_its_code(self):
         view = ws.public_view(online(link=Link.OFFLINE))

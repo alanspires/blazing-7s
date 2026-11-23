@@ -17,16 +17,20 @@ import sas_machine as sm
 import sas_profile as sp
 import sas_protocol as protocol
 import web_state as ws
+import web_views as wv
 import web_worker as ww
 from sas_testing import (
+    ACCEPTED,
     ARM,
     BEGIN,
     BUSY,
     CHUNK,
     COMMIT,
     EXTENSION_POLL,
+    GAME_STARTED,
     INFO,
     INTERRUPTED,
+    OK,
     READ,
     RESTORE,
     SLOT_DOOR,
@@ -37,6 +41,7 @@ from sas_testing import (
     TempDirTest,
     sent_requests,
 )
+from test_web_views import NOW, Node, Tree
 from web_journal import Journal
 from web_state import (
     Act,
@@ -242,6 +247,10 @@ class Rig:
         found = self.journal.entries(limit=100000, kinds=None if record_kind is None else (record_kind,))
         return found[::-1]
 
+    def for_intent(self, record_kind: str, intent: int) -> list[dict]:
+        """The `record_kind` records naming intent seq `intent`, oldest first."""
+        return [r for r in self.records(record_kind) if r.get("intent") == intent]
+
     def in_progress(self, name: Act) -> bool:
         running = self.state.in_progress
         return running is not None and running.name is name
@@ -395,6 +404,21 @@ class AdmissionAtTheSendTest(WorkerTest):
         self.assertEqual([t["type"] for t in rig.transfers()], [sm.IN_HOUSE_TO_MACHINE])
 
 
+class PageMoneyTest(WorkerTest):
+    def test_cash_out_takes_the_whole_balance_and_moves_in_house_out_by_exactly_it(self):
+        rig = self.rig()
+        rig.start()
+        balance = rig.state.credits
+        self.assertGreater(balance, 0)
+        result = rig.act(Act.CASH_OUT, "cash-out")
+        self.assertEqual((result.state, result.outcome), (ResultState.DONE, OutcomeWord.MOVED))
+        self.assertEqual([(t["type"], t["cashable_cents"]) for t in rig.transfers()],
+                         [(sm.IN_HOUSE_TO_HOST, balance * CPC)])
+        self.assertEqual(rig.state.credits, 0)
+        self.assertEqual((result.in_house_out_cents_delta, result.in_house_in_cents_delta), (balance * CPC, 0))
+        self.assertEqual((result.credits_delta, result.transfer_credits), (-balance, balance))
+
+
 class SpinAndArmTest(WorkerTest):
     def arm(self, rig: Rig, sid: str = "arm") -> ws.Outcome:
         outcome = next(o for o in ws.catalogue(rig.state) if o.available and o.kind is ws.Kind.WIN)
@@ -492,6 +516,20 @@ class SpinAndArmTest(WorkerTest):
         self.assertEqual(rig.state.arm.state, ArmState.NONE)
 
 
+class CabinetGameTest(WorkerTest):
+    def test_a_game_started_at_the_machine_runs_until_its_end_is_read(self):
+        rig = self.rig()
+        rig.start()
+        rig.machine.pending.append(GAME_STARTED)  # someone pressed spin at the cabinet
+        rig.drive(lambda: rig.state.game_running)
+        self.assertIsNone(rig.state.in_progress)
+        self.assertEqual(rig.submit(Act.CASH_OUT, "cash-out").code, Code.BUSY)
+        rig.machine.game = (1, (0, 0, 0), False)  # its end: the fake posts 7E then 7F with the meters
+        rig.drive(lambda: bool(rig.records("spin")) and not rig.machine.pending and not rig.state.game_running)
+        self.assertEqual(rig.records("spin")[-1]["source"], "machine")
+        self.assertIsNone(ws.admit(rig.state, rig.action(Act.CASH_OUT, "probe")))
+
+
 class LostReplyTest(WorkerTest):
     def test_a_lost_reply_at_each_step_is_sent_once_and_reconciled(self):
         def extension_op(op: int):
@@ -505,7 +543,7 @@ class LostReplyTest(WorkerTest):
             "upload begin": (Act.APPLY_PROFILE, {"profile": variant()}, extension_op(BEGIN), OutcomeWord.STAGING_ABANDONED),
             "upload commit": (Act.APPLY_PROFILE, {"profile": variant()}, extension_op(COMMIT),
                               OutcomeWord.COMMITTED_VERIFIED),
-            "restore": (Act.RESTORE_STOCK, {}, extension_op(RESTORE), OutcomeWord.HAPPENED),
+            "restore": (Act.RESTORE_STOCK, {}, extension_op(RESTORE), OutcomeWord.RESTORED),
         }
         for case, (name, params, (lose, sends), outcome) in cases.items():
             with self.subTest(case):
@@ -550,6 +588,197 @@ class LostReplyTest(WorkerTest):
         self.assertEqual(result.outcome, OutcomeWord.COMMITTED_VERIFIED)
         self.assertEqual((rig.mutations(COMMIT), rig.state.checking), (1, {}))
         self.assertTrue(rig.state.profile.custom)
+
+
+class ProfileActivityTest(WorkerTest):
+    def test_a_profile_change_checked_after_a_lost_reply_shows_once_in_activity(self):
+        cases = {
+            "apply": (Act.APPLY_PROFILE, {"profile": variant()}, COMMIT, OutcomeWord.COMMITTED_VERIFIED, "applied"),
+            "restore": (Act.RESTORE_STOCK, {}, RESTORE, OutcomeWord.RESTORED, "restored"),
+        }
+        for case, (name, params, op, outcome, change) in cases.items():
+            with self.subTest(case):
+                rig = self.rig(name=case)
+                rig.start()
+                rig.machine.lose_next(lambda key, rest, op=op: key == op)
+                result = rig.act(name, "change", **params)
+                self.assertEqual(result.outcome, outcome)
+                if name is Act.APPLY_PROFILE:  # settled by reconciliation, not by the COMMIT reply
+                    self.assertIn(sm.STEP_LOST, [r.get("result") for r in rig.records("step")])
+                self.assertEqual(rig.state.profile.custom, name is Act.APPLY_PROFILE)
+                intent = next(r["seq"] for r in rig.records("intent") if r["submission_id"] == "change")
+                told = [r for r in rig.records() if r["seq"] > intent and wv.shown(r)
+                        and (r["kind"] == "profile" or r.get("action") == name.value)]
+                self.assertEqual([(r["kind"], r.get("change")) for r in told], [("profile", change)])
+                self.assertEqual(result.generation, rig.records("outcome")[-1]["generation"])
+
+    def test_a_restart_between_the_profile_record_and_the_outcome_tells_the_change_once(self):
+        cases = {
+            "apply": (Act.APPLY_PROFILE, {"profile": variant()}, COMMIT, OutcomeWord.COMMITTED_VERIFIED, "applied"),
+            "restore": (Act.RESTORE_STOCK, {}, RESTORE, OutcomeWord.RESTORED, "restored"),
+        }
+        for case, (name, params, op, outcome, change) in cases.items():
+            for failing in (None, "profile", "outcome"):  # the record whose append fails, then a restart
+                with self.subTest(case, failing=failing):
+                    rig = self.rig(name=f"{case}-{failing}")
+                    rig.start()
+                    if name is Act.RESTORE_STOCK:
+                        rig.act(Act.APPLY_PROFILE, "custom", profile=variant())
+                    if failing is not None:
+                        rig.disk.fail = kind(failing)
+                    rig.assertSubmitted(rig.submit(name, "change", **params))
+                    result = rig.finish("change", (ResultState.CHECKING, *FINISHED))
+                    intent = next(r["seq"] for r in rig.records("intent") if r["submission_id"] == "change")
+                    if failing is not None:
+                        self.assertEqual(result.state, ResultState.CHECKING)
+                        # the profile record goes first: durable only when the outcome failed
+                        self.assertEqual((len(rig.for_intent("profile", intent)), rig.for_intent("outcome", intent)),
+                                         (int(failing == "outcome"), []))
+                        rig = self.restart(rig)
+                        rig.start()
+                        result = rig.finish("change", (ResultState.DONE,))
+                    profiles = rig.for_intent("profile", intent)
+                    outcomes = rig.for_intent("outcome", intent)
+                    self.assertEqual([(r["change"], r["generation"]) for r in profiles],
+                                     [(change, result.generation)])
+                    self.assertEqual([(r["result"], r["generation"]) for r in outcomes],
+                                     [(outcome.value, result.generation)])
+                    self.assertLess(profiles[0]["seq"], outcomes[0]["seq"])
+                    self.assertEqual((result.outcome, rig.mutations(op), rig.state.checking), (outcome, 1, {}))
+
+
+class RestoreRecoveryTest(WorkerTest):
+    """A lost RESTORE_STOCK reply settled from STATUS: stock is shown and told only on the proof
+    an acknowledged restore needs (sas_extension.stock_restored)."""
+
+    def lose_restore(self, rig: Rig, last_status: int, fault: bool = False) -> None:
+        """Lose the next restore's reply and leave the custom profile active with `last_status`,
+        as a power loss before the switch (INTERRUPTED) or a pending recovery (ACCEPTED) does."""
+        fake = rig.machine.extension
+        custom = (fake.active, fake.profile_crc, fake.generation)
+
+        def not_switched(key, rest):
+            if key == RESTORE:
+                fake.active, fake.profile_crc, fake.generation = custom
+                fake.last_status, fake.fault = last_status, fault
+                rig.machine.after = None
+
+        rig.machine.lose_next(lambda key, rest: key == RESTORE)
+        rig.machine.after = not_switched
+
+    def custom_rig(self) -> Rig:
+        rig = self.rig()
+        rig.start()
+        rig.act(Act.APPLY_PROFILE, "custom", profile=variant())
+        return rig
+
+    def told(self, rig: Rig, sid: str) -> list[tuple]:
+        """What Activity shows about the restore: its profile record and its outcome."""
+        intent = next(r["seq"] for r in rig.records("intent") if r["submission_id"] == sid)
+        return [(r["kind"], r.get("change", r.get("result"))) for r in rig.records()
+                if r["seq"] > intent and wv.shown(r)
+                and (r["kind"] == "profile" or r.get("action") == Act.RESTORE_STOCK.value)]
+
+    def test_an_interrupted_restore_with_the_custom_profile_active_publishes_and_tells_no_stock(self):
+        rig = self.custom_rig()
+        self.lose_restore(rig, INTERRUPTED)
+        result = rig.act(Act.RESTORE_STOCK, "restore")
+        self.assertEqual((result.state, result.outcome), (ResultState.DONE, OutcomeWord.INTERRUPTED))
+        rig.run_for(ww.REFRESH_INTERVAL)
+        self.assertTrue(rig.state.profile.custom)
+        self.assertEqual(self.told(rig, "restore"), [("outcome", OutcomeWord.INTERRUPTED.value)])
+        self.assertEqual((rig.mutations(RESTORE), rig.state.checking), (1, {}))
+
+    def test_a_pending_restore_with_a_fault_stays_open_showing_it_until_status_proves_stock(self):
+        rig = self.custom_rig()
+        self.lose_restore(rig, ACCEPTED, fault=True)
+        rig.assertSubmitted(rig.submit(Act.RESTORE_STOCK, "restore"))
+        result = rig.finish("restore", (ResultState.CHECKING, *FINISHED))
+        rig.run_for(ww.REFRESH_INTERVAL)
+        self.assertEqual(result.state, ResultState.CHECKING)
+        self.assertIn(Family.EXTENSION, rig.state.checking)
+        self.assertTrue(rig.state.ext_status.fault)
+        self.assertEqual(self.told(rig, "restore"), [])
+        fake = rig.machine.extension  # the firmware's own recovery finishes the restore
+        fake.active, fake.profile_crc, fake.last_status, fake.fault = None, 0, OK, False
+        fake.generation += 1
+        result = rig.finish("restore", (ResultState.DONE,))
+        self.assertEqual(result.outcome, OutcomeWord.RESTORED)
+        self.assertFalse(rig.state.profile.custom)
+        self.assertEqual(self.told(rig, "restore"), [("profile", "restored")])
+        self.assertEqual(rig.mutations(RESTORE), 1)
+
+
+class RestoreReplyTest(WorkerTest):
+    """A RESTORE_STOCK the machine answers with a status other than OK, through the worker to
+    what Odds and Play render."""
+
+    NO_REFRESH = 1e9  # seconds: no periodic refresh falls due within a test
+
+    def custom_rig(self) -> Rig:
+        """A custom profile applied, and the STATUS read its change asked for done."""
+        rig = self.rig()
+        rig.start()
+        rig.act(Act.APPLY_PROFILE, "custom", profile=variant())
+        reads = self.status_reads(rig)
+        rig.drive(lambda: self.status_reads(rig) > reads)
+        return rig
+
+    @staticmethod
+    def status_reads(rig: Rig) -> int:
+        return [request[0] for request in rig.machine.extension.requests].count(STATUS)
+
+    def refuse_restore(self, rig: Rig, status: se.Status, *, switched: bool = False) -> None:
+        """The next RESTORE_STOCK answers status; switched: the custom profile was already
+        left and the machine faulted mid-switch (firmware/src/core.c restore_stock)."""
+        fake = rig.machine.extension
+        execute = fake.execute
+
+        def refusing(op, payload):
+            if op != RESTORE:
+                return execute(op, payload)
+            if switched:
+                fake.active, fake.profile_crc, fake.fault = None, 0, True
+                fake.generation += 1
+            return status
+
+        fake.execute = refusing
+
+    def rendered(self, rig: Rig) -> tuple[Node, Node]:
+        """Odds' status notice and Play's banner for the current snapshot."""
+        odds = wv.regions(rig.state, wv.View(page="odds"), now=NOW)
+        play = wv.regions(rig.state, wv.View(), now=NOW)
+        return Tree(odds["odds-status"]).root.children[0], Tree(play["banner"]).root.children[0]
+
+    def test_a_busy_restore_reply_is_a_refusal_that_changed_nothing(self):
+        rig = self.custom_rig()
+        self.refuse_restore(rig, se.Status.BUSY)
+        result = rig.act(Act.RESTORE_STOCK, "restore")
+        self.assertEqual((result.state, result.outcome, result.machine_status),
+                         (ResultState.DONE, OutcomeWord.REFUSED, se.Status.BUSY))
+        self.assertTrue(rig.state.profile.custom)
+        self.assertEqual((rig.mutations(RESTORE), rig.state.checking), (1, {}))
+        notice, banner = self.rendered(rig)
+        self.assertEqual((notice.attrs.get("data-result"), notice.attrs.get("data-status")),
+                         ("restore-refused", se.Status.BUSY.name))
+        self.assertEqual((banner.attrs.get("data-banner"), banner.attrs.get("data-status")),
+                         ("refused", se.Status.BUSY.name))
+
+    def test_a_fault_restore_reply_claims_nothing_and_status_is_read_for_the_active_game(self):
+        with mock.patch.object(ww, "REFRESH_INTERVAL", self.NO_REFRESH):
+            rig = self.custom_rig()
+            self.refuse_restore(rig, se.Status.FAULT, switched=True)
+            result = rig.act(Act.RESTORE_STOCK, "restore")
+            self.assertEqual((result.outcome, result.machine_status), (OutcomeWord.REFUSED, se.Status.FAULT))
+            # With no periodic refresh due, only the STATUS read the refusal asked for shows it.
+            rig.drive(lambda: rig.state.ext_status.fault)
+        self.assertIsNone(rig.state.profile)  # STATUS shows a fault: no game is claimed
+        self.assertEqual(rig.mutations(RESTORE), 1)
+        notice, banner = self.rendered(rig)
+        self.assertEqual((notice.attrs.get("data-result"), notice.attrs.get("data-status")),
+                         ("restore-unfinished", se.Status.FAULT.name))
+        self.assertEqual((banner.attrs.get("data-banner"), banner.attrs.get("data-status")),
+                         ("refused-unconfirmed", se.Status.FAULT.name))
 
 
 class UploadContinuationTest(WorkerTest):
@@ -631,6 +860,18 @@ class JournalFailureTest(WorkerTest):
         self.assertEqual(result.outcome, OutcomeWord.STAGING_ABANDONED)
         self.assertEqual((rig.mutations(BEGIN), rig.mutations(CHUNK), rig.mutations(COMMIT)), (1, 0, 0))
         self.assertEqual(rig.state.checking, {})
+
+
+class ClockTest(WorkerTest):
+    def test_set_the_clock_sends_one_7f_and_journals_its_confirmed_outcome(self):
+        rig = self.rig()
+        rig.start()
+        result = rig.act(Act.CLOCK_SYNC, "clock")
+        self.assertEqual((result.state, result.outcome), (ResultState.DONE, OutcomeWord.CONFIRMED))
+        self.assertEqual(len(sent_requests(rig.machine, "set-date-time")), 1)
+        [intent] = [r for r in rig.records("intent") if r["submission_id"] == "clock"]
+        [outcome] = [r for r in rig.records("outcome") if r["intent"] == intent["seq"]]
+        self.assertEqual(outcome["result"], OutcomeWord.CONFIRMED.value)
 
 
 class SettingsTest(WorkerTest):
@@ -850,6 +1091,8 @@ class PhysicalEventsTest(WorkerTest):
         result = rig.act(Act.ADD_CREDITS, "top-up", amount=amount)
         self.assertEqual((result.outcome, result.in_house_in_cents_delta), (OutcomeWord.MOVED, amount * CPC))
         self.assertEqual(len(rig.transfers()), 1)
+        self.assertNotEqual(result.credits_delta, amount)  # the game moved the balance too
+        self.assertEqual(result.transfer_credits, amount)  # what the Play banner reports
         rig.drive(lambda: len(rig.records("spin")) == 1)
         records = rig.records()
         intent = next(r["seq"] for r in records if r["kind"] == "intent")

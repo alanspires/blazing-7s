@@ -350,10 +350,17 @@ def restore(ext: Extension, explicit_id: int | None = None, *, record: Record) -
     id = _id_for(ext, info, Op.RESTORE_STOCK, explicit_id)
     _expect(ext, Op.RESTORE_STOCK, id, record=record)
     machine = ext.status()
-    if (machine.active or machine.fault
-            or (machine.last_id, machine.last_op, machine.last_status) != (id, Op.RESTORE_STOCK, Status.OK)):
+    if not stock_restored(machine, id):
         raise VerifyFailed(f"RESTORE_STOCK id {id} answered OK, but STATUS shows {machine.report()}")
     return {"id": id, "status": Status.OK.name, "generation": machine.generation}
+
+
+def stock_restored(machine: MachineStatus, id: int) -> bool:
+    """STATUS proves RESTORE_STOCK `id` finished: its own OK, the stock game active and no
+    fault. A matching ACCEPTED is still pending, and a matching INTERRUPTED or FAULT can leave
+    the custom profile active (firmware/src/core.c, fw_boot and restore_stock)."""
+    return (not machine.active and not machine.fault
+            and (machine.last_id, machine.last_op, machine.last_status) == (id, Op.RESTORE_STOCK, Status.OK))
 
 
 def act(ext: Extension, op: Op, payload: bytes, explicit_id: int | None = None, *,

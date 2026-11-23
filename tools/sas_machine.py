@@ -77,6 +77,7 @@ OP_SET_SOUND, OP_SET_BILLS, OP_SET_CLOCK = "set_sound", "set_bills", "set_clock"
 # Reconciled results
 HAPPENED, NOTHING_CHANGED, PENDING, INCONSISTENT = "happened", "nothing_changed", "pending", "inconsistent"
 COMMITTED_VERIFIED, ABORTED, STAGING_ABANDONED = "committed_verified", "aborted", "staging_abandoned"
+RESTORED, INTERRUPTED, FAULT = "restored", "interrupted", "fault"  # RESTORE_STOCK only
 # ACK-only settings
 ACKED, NACKED, UNKNOWN = "acked", "nacked", "unknown"
 # TransferOutcome.status
@@ -151,7 +152,8 @@ class TransferOutcome:
 
 @dataclass(frozen=True)
 class Reconciled:
-    result: str  # HAPPENED, NOTHING_CHANGED, PENDING, INCONSISTENT; uploads: COMMITTED_VERIFIED, ...
+    result: str  # HAPPENED, NOTHING_CHANGED, PENDING, INCONSISTENT; uploads: COMMITTED_VERIFIED, ...;
+    # RESTORE_STOCK: RESTORED, INTERRUPTED, FAULT instead of HAPPENED
     evidence: dict
 
 
@@ -511,7 +513,9 @@ def set_clock(host: sas.Host, when: dt.datetime, *, record: Record, pace: Pace,
     command = sc.BY_NAME["set-date-time"]
     stamp = when.strftime(CLOCK_FORMAT)
     values = [stamp[:8], stamp[8:]]
-    intent = {"op": OP_SET_CLOCK, "time": when.isoformat(), "request_hex": _message(host, command, values).hex()}
+    # target_time, not time: a journal assigns its own record time (web_journal.Journal.append).
+    intent = {"op": OP_SET_CLOCK, "target_time": when.isoformat(),
+              "request_hex": _message(host, command, values).hex()}
     pace()
     record(intent)
     with _uncertain_after_send(intent):
@@ -542,7 +546,12 @@ def cancel(ext: se.Extension, *, record: Record) -> dict:
 def reconcile_extension(ext: se.Extension, intent: dict, *, steps: Sequence[dict] = ()) -> Reconciled:
     """What a recorded mutation did, from STATUS and, for an upload, the CRC-bracketed
     read-back; nothing is ever resent. `steps` are an upload's step records with their journaled
-    `result` (STEP_ACKED, STEP_REFUSED or STEP_LOST) where one is known."""
+    `result` (STEP_ACKED, STEP_REFUSED or STEP_LOST) where one is known.
+
+    A RESTORE_STOCK the machine took is RESTORED only on the proof an acknowledged restore
+    needs (`sas_extension.stock_restored`); a matching INTERRUPTED or FAULT is that terminal
+    result, a matching ACCEPTED is PENDING whatever the fault flag says, and an OK that STATUS
+    contradicts (a profile active or a fault) is INCONSISTENT."""
     if intent.get("op") == se.UPLOAD_OP:
         return _reconcile_upload(ext, intent, steps)
     op = se.Op[intent["op"]]
@@ -555,8 +564,18 @@ def reconcile_extension(ext: se.Extension, intent: dict, *, steps: Sequence[dict
         return Reconciled(NOTHING_CHANGED, evidence)  # IDs only grow: the machine never took this one
     if (status.last_id, status.last_op) != (intent["id"], op):
         return Reconciled(INCONSISTENT, evidence)
+    if op == se.Op.RESTORE_STOCK:
+        return Reconciled(_restore_result(status, intent["id"]), evidence)
     taken = status.last_status in (se.Status.OK, se.Status.ACCEPTED, se.Status.INTERRUPTED, se.Status.FAULT)
     return Reconciled(HAPPENED if taken else NOTHING_CHANGED, evidence)
+
+
+def _restore_result(status: se.MachineStatus, id: int) -> str:
+    """What STATUS, naming RESTORE_STOCK `id` as its last request, says that restore did."""
+    if se.stock_restored(status, id):
+        return RESTORED
+    return {se.Status.OK: INCONSISTENT, se.Status.ACCEPTED: PENDING, se.Status.INTERRUPTED: INTERRUPTED,
+            se.Status.FAULT: FAULT}.get(status.last_status, NOTHING_CHANGED)
 
 
 def _reconcile_upload(ext: se.Extension, intent: dict, steps: Sequence[dict]) -> Reconciled:

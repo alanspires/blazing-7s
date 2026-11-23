@@ -32,11 +32,18 @@ GUARD = 60.0
 STEP_LIMIT = 20000
 PROBE_LIMIT = 5000
 SHORT_TIMEOUT = 0.2  # a server socket timeout short enough to reach in a test
+EXPANDED_LOOPBACK = "0:0:0:0:0:0:0:1"  # IPv6 loopback, spelled out
+COMPRESSED_LOOPBACK = "::1"  # the same address as a browser writes it
 
 
 # The wire contract browsers rely on, restated rather than read from web_app.
 STATIC_TYPES = MappingProxyType({".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-                                 ".svg": "image/svg+xml", ".woff2": "font/woff2"})
+                                 ".svg": "image/svg+xml", ".woff2": "font/woff2",
+                                 ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8"})
+NOTICES = (".md", ".txt")  # licence and source notices
+THIRD_PARTY = (".woff2", ".svg")  # files a notice must sit beside
+MESSAGE = "message"  # an event-stream message's type when it names none
+HEARTBEAT = "heartbeat"
 
 
 def now() -> datetime:
@@ -45,9 +52,9 @@ def now() -> datetime:
 
 class Site:
     """A Worker on a FakeS6000 with a fake clock, stepped only by the test, behind a real
-    web_app.Server on LOOPBACK."""
+    web_app.Server on LOOPBACK or the listen address given."""
 
-    def __init__(self, test: TempDirTest, *, start: bool = True, **options):
+    def __init__(self, test: TempDirTest, *, start: bool = True, listen: str = LOOPBACK, **options):
         self.machine = FakeS6000(clock=FakeClock())
         self.clock = self.machine.clock
         # Durability is test_web_journal's subject; here an fsync is only disk latency.
@@ -57,13 +64,14 @@ class Site:
         if start:
             self.drive(lambda: self.worker.snapshot().fresh)
         self.logged: list[str] = []
-        self.server = web_app.Server((LOOPBACK, 0), self.worker, self.journal, log=self.logged.append, **options)
+        self.listen = listen
+        self.server = web_app.Server((listen, 0), self.worker, self.journal, log=self.logged.append, **options)
         thread = threading.Thread(target=self.server.serve_forever)
         thread.start()
         test.addCleanup(thread.join)
         test.addCleanup(self.server.server_close)
         test.addCleanup(self.server.shutdown)
-        self.host = f"{LOOPBACK}:{self.server.port}"
+        self.host = f"[{listen}]:{self.server.port}" if ":" in listen else f"{listen}:{self.server.port}"
         self.origin = f"http://{self.host}"
 
     @property
@@ -83,7 +91,7 @@ class Site:
         return next((r for r in self.state.results if r.submission_id == submission_id), None)
 
     def connection(self) -> http.client.HTTPConnection:
-        return http.client.HTTPConnection(LOOPBACK, self.server.port, timeout=GUARD)
+        return http.client.HTTPConnection(self.listen, self.server.port, timeout=GUARD)
 
     def request(self, method: str, target: str, body: bytes | None = None,
                 headers: dict | None = None) -> tuple[int, http.client.HTTPResponse, bytes]:
@@ -113,7 +121,7 @@ class Site:
         return json.loads(body)
 
     def stream(self, page: str = "play", timeout: float = GUARD) -> http.client.HTTPResponse:
-        connection = http.client.HTTPConnection(LOOPBACK, self.server.port, timeout=timeout)
+        connection = http.client.HTTPConnection(self.listen, self.server.port, timeout=timeout)
         connection.request("GET", f"/events?page={page}")
         return connection.getresponse()
 
@@ -124,20 +132,36 @@ class Site:
         return response
 
 
-def message(stream: http.client.HTTPResponse) -> tuple[str, object]:
-    """The next event-stream message: ("data", the decoded JSON) or ("comment", its text)."""
+def frame(stream: http.client.HTTPResponse) -> list[str]:
+    """The next event-stream frame's lines."""
     lines = []
     while True:
         line = stream.readline()
         if not line:
             raise AssertionError("the stream ended")
         if line == b"\n":
-            break
+            return lines
         lines.append(line.decode().rstrip("\n"))
-    if lines[0].startswith(":"):
-        return "comment", lines[0][1:].strip()
+
+
+def message(stream: http.client.HTTPResponse) -> tuple[str, object]:
+    """The next event-stream message: its event type (MESSAGE when it names none) and its
+    decoded JSON data."""
+    return parsed(frame(stream))
+
+
+def parsed(lines: list[str]) -> tuple[str, object]:
+    event = next((line[len("event: "):] for line in lines if line.startswith("event: ")), MESSAGE)
     data = "".join(line[len("data: "):] for line in lines if line.startswith("data: "))
-    return "data", json.loads(data)
+    return event, json.loads(data)
+
+
+def opened(stream: http.client.HTTPResponse) -> dict:
+    """Read a fresh stream's opening: the whole region set, then a heartbeat; the regions."""
+    kind, first = message(stream)
+    assert kind == MESSAGE, kind
+    assert message(stream)[0] == HEARTBEAT
+    return first["regions"]
 
 
 class AppTest(TempDirTest):
@@ -197,7 +221,7 @@ class StaticTest(AppTest):
         root = self.dir / "static"
         (root / "icons").mkdir(parents=True)
         (root / "shown.css").write_text("shown")
-        (root / "notes.txt").write_text("not a served type")
+        (root / "notes.html").write_text("not a served type")
         (self.dir / "secret.css").write_text("outside the static files")
         (root / "link.css").symlink_to(self.dir / "secret.css")
         self.addCleanup(setattr, web_app, "STATIC_ROOT", web_app.STATIC_ROOT)
@@ -206,10 +230,23 @@ class StaticTest(AppTest):
         status, _, body = site.get("/static/shown.css")
         self.assertEqual((status, body), (200, b"shown"))
         for target in ("/static/../secret.css", "/static/%2e%2e/secret.css", "/static/..%2fsecret.css",
-                       "/static/link.css", "/static/notes.txt", "/static/icons", "/static/missing.css",
+                       "/static/link.css", "/static/notes.html", "/static/icons", "/static/missing.css",
                        "/static/"):
             with self.subTest(target=target):
                 self.assertEqual(site.get(target)[0], 404)
+
+    def test_the_notices_beside_the_bundled_fonts_and_icons_are_served_as_text(self):
+        site = self.site()
+        notices = sorted(path for path in web_app.STATIC_ROOT.rglob("*") if path.suffix in NOTICES)
+        bundled = {path.parent for suffix in THIRD_PARTY for path in web_app.STATIC_ROOT.rglob(f"*{suffix}")}
+        self.assertTrue(bundled)
+        self.assertLessEqual(bundled, {notice.parent for notice in notices})
+        for notice in notices:
+            target = wv.STATIC + "/" + notice.relative_to(web_app.STATIC_ROOT).as_posix()
+            with self.subTest(target=target):
+                status, response, body = site.get(target)
+                self.assertEqual((status, response.getheader("Content-Type")), (200, STATIC_TYPES[notice.suffix]))
+                self.assertEqual(body, notice.read_bytes())
 
 
 class ActionsTest(AppTest):
@@ -272,10 +309,13 @@ class ActionsTest(AppTest):
     def test_preview_answers_the_draft_regions_and_submits_nothing(self):
         site = self.site()
         results = site.state.results
-        fields = {"award-10": "3"}
+        fields = {"award-10": "3", wv.F_GENERATION: str(ws.profile_generation(site.state))}
         status, _, body = site.post(web_app.PREVIEW, fields)
         self.assertEqual(status, 200)
-        self.assertEqual(set(json.loads(body)["regions"]), set(wv.preview_regions(site.state, fields)))
+        # The posted draft's own regions (test_web_views pins their figures to sas_profile.preview).
+        regions = json.loads(body)["regions"]
+        self.assertEqual(regions, wv.preview_regions(site.state, fields))
+        self.assertNotEqual(regions, wv.preview_regions(site.state, {}))
         self.assertEqual(site.state.results, results)
 
 
@@ -287,6 +327,25 @@ class EdgeTest(AppTest):
         for host in (f"rebound.example:{site.server.port}", f"{LOOPBACK}:{site.server.port + 1}", ""):
             with self.subTest(host=host):
                 self.assertEqual(site.get("/state.json", Host=host)[0], 403)
+
+    # Browsers send an IPv6 literal compressed, whatever spelling the page was given.
+    def test_an_expanded_ipv6_allowed_host_admits_its_compressed_spelling(self):
+        self.assert_admits_compressed(self.site(allow_hosts=(EXPANDED_LOOPBACK,)))
+
+    def test_an_expanded_ipv6_listen_address_admits_its_compressed_spelling(self):
+        if not binds_ipv6_loopback():
+            self.skipTest("no IPv6 loopback to listen on")
+        self.assert_admits_compressed(self.site(listen=EXPANDED_LOOPBACK))
+
+    def assert_admits_compressed(self, site: Site) -> None:
+        port = site.server.port
+        host = f"[{COMPRESSED_LOOPBACK}]:{port}"
+        self.assertEqual(site.get("/state.json", Host=host)[0], 200)
+        status, _, _ = site.post("bet-one", {}, headers={"Host": host, "Origin": f"http://{host}"})
+        self.assertEqual(status, 202)
+        for other in (f"[::2]:{port}", f"rebound.example:{port}"):
+            with self.subTest(host=other):
+                self.assertEqual(site.get("/state.json", Host=other)[0], 403)
 
     def test_posts_from_another_origin_are_refused_before_anything_is_submitted(self):
         site = self.site()
@@ -324,6 +383,15 @@ class EdgeTest(AppTest):
         self.assertEqual(site.get("/state.json")[0], 200)
 
 
+def binds_ipv6_loopback() -> bool:
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.bind((COMPRESSED_LOOPBACK, 0))
+    except OSError:
+        return False
+    return True
+
+
 def read_all(connection: socket.socket) -> bytes:
     data = b""
     while True:
@@ -339,29 +407,34 @@ class EventsTest(AppTest):
         stream = site.stream("play")
         self.addCleanup(stream.close)
         self.assertEqual(stream.getheader("Content-Type"), "text/event-stream")
-        kind, first = message(stream)
+        first = opened(stream)
         everything = set(wv.regions(site.state, wv.view_for(None, "page=play"), now=now()))
-        self.assertEqual((kind, set(first["regions"])), ("data", everything))
+        self.assertEqual(set(first), everything)
         self.assertEqual(site.post("bet-one", {})[0], 202)
         kind, update = message(stream)
-        self.assertEqual(kind, "data")
+        self.assertEqual(kind, MESSAGE)
         self.assertTrue(update["regions"])
         self.assertLessEqual(set(update["regions"]), everything)
         for name, markup in update["regions"].items():
-            self.assertNotEqual(markup, first["regions"][name])
+            self.assertNotEqual(markup, first[name])
 
-    def test_a_quiet_stream_sends_keepalive_comments(self):
-        site = self.site(keepalive=0.01)
+    def test_a_quiet_stream_sends_heartbeats_the_page_can_see_with_a_deadline_past_their_period(self):
+        keepalive = 0.01
+        site = self.site(keepalive=keepalive)
         stream = site.stream()
         self.addCleanup(stream.close)
-        self.assertEqual(message(stream)[0], "data")
-        self.assertEqual(message(stream)[0], "comment")
+        opened(stream)
+        lines = frame(stream)  # nothing changed since the opening
+        self.assertTrue(any(line.startswith(":") for line in lines))  # a keepalive comment
+        kind, heartbeat = parsed(lines)
+        self.assertEqual(kind, HEARTBEAT)
+        self.assertGreater(heartbeat["deadline"], keepalive)
 
     def test_streams_over_the_cap_get_503_and_regions_still_answer(self):
         site = self.site(subscribers=1)
         stream = site.stream()
         self.addCleanup(stream.close)
-        self.assertEqual(message(stream)[0], "data")
+        opened(stream)
         over = site.stream_status()
         self.assertEqual(over.status, 503)
         self.assertIsNotNone(over.getheader("Retry-After"))
@@ -391,7 +464,7 @@ class EventsTest(AppTest):
         site = self.site()
         stream = site.stream(timeout=web_app.KEEPALIVE / 3)  # an end at the keepalive times out
         self.addCleanup(stream.close)
-        self.assertEqual(message(stream)[0], "data")
+        opened(stream)
         site.server.shutdown()
         site.server.server_close()
         self.assertEqual(stream.readline(), b"")

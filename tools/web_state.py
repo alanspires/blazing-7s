@@ -269,10 +269,31 @@ class ActionResult:
     outcome: OutcomeWord | None = None
     reason: str | None = None
     code: Code | None = None  # a refusal's code
-    credits_delta: int | None = None
+    credits_delta: int | None = None  # the net balance change, play at the machine included
+    transfer_credits: int | None = None  # a completed transfer's amount, as the in-house meters verified it
     in_house_in_cents_delta: int | None = None
     in_house_out_cents_delta: int | None = None
     evidence: SpinEvidence | None = None
+    generation: int | None = None  # a verified profile change's committed generation
+    machine_status: se.Status | None = None  # the extension's own non-OK reply to the action
+
+
+# Extension statuses the firmware answers before any side effect (firmware/src/core.c
+# process_mutation, execute and commit_profile; game.c validate_change): a mutation refused
+# with one of them changed nothing. Any other, FAULT above all, can follow a partial
+# profile transition (game.c game_finish_profile_change), so only STATUS says what is active.
+UNCHANGED_REFUSALS = frozenset((se.Status.BAD_REQUEST, se.Status.BAD_VERSION, se.Status.BAD_ID,
+                                se.Status.BUSY, se.Status.INVALID_PROFILE, se.Status.INCOMPLETE,
+                                se.Status.UNSUPPORTED))
+
+
+def changed_nothing(result: ActionResult) -> bool:
+    """Whether a result the machine said no to is known to have changed nothing: a correlated
+    transfer rejection or settings NACK, or an extension refusal answered before any side
+    effect."""
+    if result.outcome in (OutcomeWord.REJECTED, OutcomeWord.NACKED):
+        return True
+    return result.outcome is OutcomeWord.REFUSED and result.machine_status in UNCHANGED_REFUSALS
 
 
 @dataclass(frozen=True)
@@ -292,6 +313,7 @@ class MachineState:
     arm: Arm = Arm()
     bet_per_line: int | None = None  # the shared chosen bet; None: the profile's maximum
     in_progress: Action | None = None
+    game_running: bool = False  # the machine reported a game start (7E) whose end is not yet read
     checking: Mapping[Family, Hold] = field(default_factory=lambda: MappingProxyType({}))
     last_spin: LastSpin | None = None
     settings: Settings = Settings()
@@ -398,8 +420,8 @@ def _cancel_arm(state: MachineState, action: Action) -> tuple[Code, str] | None:
 def _profile_change(state: MachineState, action: Action) -> tuple[Code, str] | None:
     if (refused := _extension(state, se.Capability.PROFILE)):
         return refused
-    if state.in_progress is not None:
-        return Code.BUSY, "After the spin"
+    if (refused := _busy(state)):
+        return refused
     return (_pending(state, action.name) or _nothing_armed(state)
             or _out_of_date(state, action, generation=action.name is Act.APPLY_PROFILE))
 
@@ -420,8 +442,8 @@ def _add_credits(state: MachineState, action: Action) -> tuple[Code, str] | None
 
 
 def _cash_out(state: MachineState, action: Action) -> tuple[Code, str] | None:
-    if state.in_progress is not None:
-        return Code.BUSY, "After the spin"
+    if (refused := _busy(state)):
+        return refused
     if (refused := _transfers(state, to_machine=False)):
         return refused
     if not state.credits:
@@ -459,7 +481,12 @@ def _play_gate(state: MachineState, capability: se.Capability,
         return Code.PAUSED, "Paused"
     if open_door(state) is not None:
         return Code.DOOR_OPEN, "Door open"
-    if state.in_progress is not None:
+    return _busy(state)
+
+
+def _busy(state: MachineState) -> tuple[Code, str] | None:
+    """An action of this page, or a game started at the machine, is still running."""
+    if state.in_progress is not None or state.game_running:
         return Code.BUSY, "After the spin"
     return None
 
@@ -561,8 +588,15 @@ def public_view(state: MachineState) -> dict:
                    **_admission(top_up)},
         "checking": {family.value: {"reason": hold.reason, "intent_seq": hold.intent_seq}
                      for family, hold in state.checking.items()},
+        "extension_fault": extension_fault(state),
         "results": [_result(r) for r in state.results[:RESULTS_LIMIT]],
     }
+
+
+def extension_fault(state: MachineState) -> bool | None:
+    """The fault flag of the extension's last STATUS; None before STATUS was read. A pending
+    restore can stay ACCEPTED with it set (decision-20 r5): it is shown, never resolved."""
+    return None if state.ext_status is None else state.ext_status.fault
 
 
 def _admission(refusal: Refusal | None) -> dict:
@@ -584,6 +618,7 @@ def _result(result: ActionResult) -> dict:
         "in_house_in_cents_delta": result.in_house_in_cents_delta,
         "in_house_out_cents_delta": result.in_house_out_cents_delta,
         "evidence": None if evidence is None else asdict(evidence),
+        "machine_status": None if result.machine_status is None else result.machine_status.name,
     }
 
 

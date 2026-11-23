@@ -57,8 +57,25 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   action while a money intent is open; no extension mutation while an extension intent is
   open or STATUS shows ACCEPTED, except the firmware's own handoff for a correlated pending
   arm (exactly CANCEL_OUTCOME and the BET_SPIN bound to it).
-- An `inconsistent` money or upload result keeps the intent open and its family held by
-  design (decision-3 r4): no page control releases it. A restart, or a reconnect, re-runs
+- A lost restore reply never closes `happened` (decision-20 r1): `restored` only on the
+  acknowledged restore's STATUS proof (`sas_extension.stock_restored`: matching OK, stock
+  active, no fault); a matching INTERRUPTED or FAULT closes with that word and no profile
+  record; still ACCEPTED holds the family checking, with STATUS's fault flag shown on the
+  checking notice and banner (`data-fault`) and in `/state.json` (`extension_fault`), never
+  relabelled terminal; a matching OK that STATUS contradicts is held `inconsistent`.
+- A restore the machine answers with a non-OK status closes `refused` with that status on
+  its result (`machine_status`) and has STATUS read again. Only a status the firmware
+  answers before any side effect (`web_state.UNCHANGED_REFUSALS`) may be told as "nothing
+  changed"; FAULT can follow a partial profile transition, so the page claims neither
+  restored nor unchanged and lets STATUS show the active game.
+- Terminal restore feedback on Odds (stopped, or refused) is shown whatever the odds draft
+  holds, valid or not, with the draft kept and its note beside it.
+- Every verified profile change (apply `committed_verified`, restore `restored`,
+  acknowledged or reconciled) closes through one worker finalizer: the `profile` record
+  naming its intent is journaled before the outcome, the journal folds it onto the open
+  intent, and the outcome's result carries the committed `generation`.
+- An `inconsistent` money, upload or restore result keeps the intent open and its family
+  held by design (decision-3 r4): no page control releases it. A restart, or a reconnect, re-runs
   reconciliation from the journal; anything further is a person reading the machine and
   the journal, never an automatic send. An upload `pending` on a possible COMMIT holds
   every profile mutation and re-checks at each periodic refresh and reconnect; one with no
@@ -77,6 +94,18 @@ this slice owns how the page schedules, admits, journals and reconciles them.
 - A spin or arm carries the profile generation, per-line bet and arm identity the page
   rendered; any difference refuses it as out of date without sending. Bet one and Max bet
   only change the server's shared chosen bet and never depend on credits.
+- An odds draft is admitted for the generation its form carries, in the preview, the
+  no-script Preview (GET `/odds`, `View.generation`) and the apply POST, never the
+  snapshot's; a draft with no generation is admitted for none. `live.js` rebases its editor
+  in place only onto its own apply verified at the active generation (`data-applied`),
+  keeping every field node and the focused or post-apply-edited values. Its max bet per line is always the active profile's:
+  the editor shows it and has no field for it (decision-18, the owner's ruling).
+- A refusal by the worker after HTTP admission reaches people only through the `results`
+  ring. The page that submitted it learns it by submission ID: the status region lists every
+  refused result in the ring (`data-refused`), and `live.js` flashes, once and with its code,
+  the refusal of a submission its own 202 answer named, unless a region shows it already.
+  Without JavaScript the views show the newest refused result with its code where the
+  action lives (Play banner, Odds status, Settings row).
 - Refusals answer 503 for `Code.OFFLINE` and `Code.STALE` and 409 otherwise;
   `Code.JOURNAL` and `Code.INVALID_PROFILE` come only from the worker.
 
@@ -133,7 +162,10 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   spin, arm, cancel, upload and restore step, journal failures before and after a send,
   and restart reconciliation.
 - `test_web_browser.py` (pytest-playwright, Chromium) covers live updates across pages,
-  one-tap actions, lost-reply and offline disablement, an edited draft surviving a live
-  update and phone Play without scrolling.
+  one-tap actions, lost-reply and offline disablement, a silent stream showing unreachable,
+  an edited draft surviving a live update, the editor rebased in place after its own apply
+  (a focused, partly selected field keeping its node, value and selection), a queued spin's
+  refusal shown to the page that sent it behind a newer result, and phone Play without
+  scrolling.
 - Validate a placeholder-substituted copy of the unit with `systemd-analyze verify`
   outside the repository.

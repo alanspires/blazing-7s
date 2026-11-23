@@ -196,6 +196,21 @@ class IntentTest(JournalTest):
                          (intent, UPLOAD_ID, tuple(steps)))
         self.assertTrue(open_upload.commit_sent)
 
+    def test_a_profile_record_naming_an_open_intent_stays_on_it_across_reopening_once(self):
+        journal = self.open()
+        intent = journal.append(deposit_intent("s1"))
+        told = {"kind": "profile", "source": "page", "intent": intent["seq"], "change": "restored"}
+        profile = journal.append(told)
+        journal = self.reopen(journal)
+        (still_open,) = journal.open_intents()
+        self.assertEqual(still_open.profile, profile)
+        with self.assertRaises(ValueError):  # a second record for the same change
+            journal.append(told)
+        journal.append({"kind": "outcome", "source": "page", "intent": intent["seq"], "result": "restored"})
+        with self.assertRaises(ValueError):  # its intent is closed
+            journal.append(told)
+        self.assertEqual(len(journal.entries(limit=10)), 3)
+
     def test_counters_add_up_moved_credits_across_reopening(self):
         journal = self.open()
         moves = [("in", 5000), ("in", 100), ("out", 5100), (None, 0)]

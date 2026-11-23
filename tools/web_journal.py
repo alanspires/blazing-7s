@@ -18,6 +18,9 @@ it keeps state from:
 - `outcome` closes the intent whose `seq` it names in `intent`. A money outcome that moved
   credits carries `transfer`: {"direction": "in" | "out", "credits": n}, which the counters
   add up.
+- `profile` tells a verified profile change. One that names in `intent` the open intent
+  that made it is journaled before that intent's outcome, at most one per intent, so a
+  restart between the two finds it on the open intent and does not tell the change twice.
 - Any record may carry `arm` ({"state": one of ARM_STATES, ...the arm's name, bet, stops
   and extension id}) and `settings` ({setting name: web_state.Setting value}): the newest of
   each is what the journal restores. The worker owns their meaning; the journal only keeps the latest.
@@ -70,10 +73,12 @@ class JournalCorrupt(JournalError):
 
 @dataclass(frozen=True)
 class OpenIntent:
-    """An intent with no outcome yet, and for an upload the step records journaled for it."""
+    """An intent with no outcome yet, for an upload the step records journaled for it, and
+    the profile record already journaled for it, if any."""
 
     record: dict
     steps: tuple[dict, ...] = ()
+    profile: dict | None = None
 
     @property
     def seq(self) -> int:
@@ -271,6 +276,10 @@ class Journal:
                 raise ValueError(f"step for upload {record.get('upload_id')!r}, which is not open")
             if record.get("intent", upload) != upload or not isinstance(record.get("op"), str):
                 raise ValueError(f"step {record!r} does not match open upload intent {upload}")
+        if kind == "profile" and "intent" in record:
+            intent = self._open.get(record["intent"])
+            if intent is None or intent.profile is not None:
+                raise ValueError(f"profile for intent {record['intent']!r}, which is not open or already has one")
         if kind == "outcome":
             if record.get("intent") not in self._open:
                 raise ValueError(f"outcome for intent {record.get('intent')!r}, which is not open")
@@ -289,7 +298,10 @@ class Journal:
         elif kind == "step":
             seq = self._uploads[record["upload_id"]]
             intent = self._open[seq]
-            self._open[seq] = OpenIntent(intent.record, (*intent.steps, record))
+            self._open[seq] = OpenIntent(intent.record, (*intent.steps, record), intent.profile)
+        elif kind == "profile" and "intent" in record:
+            intent = self._open[record["intent"]]
+            self._open[intent.seq] = OpenIntent(intent.record, intent.steps, record)
         elif kind == "outcome":
             intent = self._open.pop(record["intent"])
             if intent.upload_id is not None:

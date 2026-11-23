@@ -14,11 +14,15 @@ import sas_machine as sm
 import sas_profile as sp
 import sas_protocol as protocol
 from sas_testing import (
+    ACCEPTED,
     ARM,
     BEGIN,
     CANCEL,
     CHUNK,
     COMMIT,
+    FAULT,
+    INTERRUPTED,
+    OK,
     POWER_APPLIED,
     READ,
     RESTORE,
@@ -329,18 +333,31 @@ class ExtensionActionTest(unittest.TestCase):
         machine.lose = set()
         self.assertEqual(sm.reconcile_extension(ext, caught.exception.intent).result, sm.NOTHING_CHANGED)
 
-    def test_a_lost_restore_reply_is_sent_once_and_reconciled(self):
-        machine = FakeS6000()
-        ext = extension(machine)
-        se.upload(ext, variant(), record=keep)
-        machine.lose = {RESTORE}
-        intents: list[dict] = []
-        with self.assertRaises(se.UncertainOutcome):
-            se.restore(ext, record=intents.append)
-        machine.lose = set()
-        self.assertEqual(sm.reconcile_extension(ext, intents[-1]).result, sm.HAPPENED)
-        self.assertEqual([r[0] for r in machine.extension.mutations()].count(RESTORE), 1)
-        self.assertIsNone(machine.extension.active)
+    def test_a_lost_restore_reply_is_sent_once_and_reconciled_to_what_status_proves(self):
+        cases = {  # STATUS after the lost reply: the restore's status, custom profile still active, fault
+            "restored": (OK, False, False, sm.RESTORED),
+            "interrupted before the switch": (INTERRUPTED, True, False, sm.INTERRUPTED),
+            "faulted": (FAULT, True, True, sm.FAULT),
+            "pending with a fault": (ACCEPTED, True, True, sm.PENDING),
+            "OK with a profile active": (OK, True, False, sm.INCONSISTENT),
+        }
+        for case, (status, active, fault, result) in cases.items():
+            with self.subTest(case):
+                machine = FakeS6000()
+                ext = extension(machine)
+                se.upload(ext, variant(), record=keep)
+                fake = machine.extension
+                custom = (fake.active, fake.profile_crc)
+                machine.lose = {RESTORE}
+                intents: list[dict] = []
+                with self.assertRaises(se.UncertainOutcome):
+                    se.restore(ext, record=intents.append)
+                machine.lose = set()
+                fake.last_status, fake.fault = status, fault
+                if active:
+                    fake.active, fake.profile_crc = custom
+                self.assertEqual(sm.reconcile_extension(ext, intents[-1]).result, result)
+                self.assertEqual([r[0] for r in fake.mutations()].count(RESTORE), 1)
 
 
 def keep(intent: dict) -> None:

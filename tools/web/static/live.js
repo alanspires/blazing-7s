@@ -7,28 +7,58 @@
 // panels are URL state and never change under the reader.
 //
 // While the stream is down every control is off and the server-unreachable banner shows. The
-// stream closes while the tab is hidden; on return, controls stay off until the reopened
-// stream's first snapshot has been applied. When /events turns the page away (503: too many
-// open pages) the page polls GET /regions instead.
+// server sends a heartbeat event whenever the stream is otherwise quiet, naming the deadline
+// after which silence means the connection is gone even though the browser saw no close: the
+// page then shows the server unreachable and opens a fresh stream. The stream closes while
+// the tab is hidden; on return, controls stay off until the reopened stream's first snapshot
+// has been applied. When /events turns the page away (503: too many open pages) the page
+// polls GET /regions instead.
+//
+// The Add credits amount is a field like any other, so a typed amount survives live updates;
+// whether it can be sent is still the server's call. While it holds a typed amount, the sheet
+// is re-rendered for that amount by GET /regions and everything around the field taken from
+// it: the submit button's state and reason, the error and the chips.
 //
 // Forms posting to /actions/ go by fetch and the page waits for the next snapshot to show the
-// result; nothing is ever re-sent. Odds editor edits ask POST /actions/preview for the
-// preview regions, debounced.
+// result; nothing is ever re-sent. The page keeps the submission IDs its 202 answers name:
+// when the worker later refuses one of them (the status region lists refused submissions),
+// the page flashes that refusal once, with its code, unless a region already shows it.
+//
+// Odds editor edits ask POST /actions/preview for the preview regions, debounced; the preview
+// admits Apply for the generation the draft's form carries, so a draft kept across another
+// page's apply shows Apply out of date. Once this page's own apply is verified on the machine
+// and its profile is still the active one (the editor region names its submission ID), the
+// editor is rebased in place: each field's baseline, the cell marks and the form's generation
+// become the applied profile's, while every field node stays, and a focused field or one
+// typed in since the apply keeps its value, caret and selection, as an edit of the new
+// baseline.
 "use strict";
 
 (function () {
   const POLL_MS = 3000; // GET /regions period when /events is over its subscriber cap
   const REOPEN_MS = 5000; // retry period for a stream the server closed
   const PREVIEW_MS = 400; // quiet time after an odds edit before asking for its preview
+  const AMOUNT_MS = 400; // quiet time after an amount edit before asking whether it can go
   const view = document.body.dataset.view || "page=play";
+  const FIELD = "input[name], select[name], textarea[name]";
   const shown = {}; // region id -> markup last applied
+  const received = {}; // region id -> markup last received, applied or not
   let stream = null;
   let pollTimer = null;
   let reopenTimer = null;
   let previewTimer = null;
   let previewSeq = 0;
+  let amountTimer = null;
+  let amountSeq = 0;
+  let silenceTimer = null;
+  let silenceMs = null; // the server's deadline for a quiet stream, from its heartbeat
   let awaiting = true; // controls stay off until a snapshot has been applied
   let unreachable = false;
+  let ownApply = null; // this page's apply until it is verified: {id, values posted}
+  // Submission IDs this page's 202 answers named, oldest first, until refused or aged out of
+  // the server's results ring (web_state.RESULTS_LIMIT newest results).
+  const OWN_LIMIT = 32;
+  const ownSubmissions = new Set();
   const pendingForms = new Set();
 
   function parse(markup) {
@@ -118,8 +148,13 @@
 
   function snapshot(regions) {
     const recovering = awaiting;
+    Object.assign(received, regions);
+    rebaseEditor();
     applyRegions(regions, recovering, false);
+    showOwnRefusals();
     if (editorDirty()) schedulePreview(); // the machine's profile may have moved under the draft
+    const credits = region("add-credits");
+    if (credits && isProtected(credits, false)) scheduleAmountCheck(); // and admission under the amount
     if (recovering) {
       awaiting = false;
       unreachable = false;
@@ -143,16 +178,37 @@
     }
   }
 
+  // Restart the silence deadline: called on everything the stream delivers.
+  function heard() {
+    clearTimeout(silenceTimer);
+    if (silenceMs !== null) silenceTimer = setTimeout(silent, silenceMs);
+  }
+
+  function silent() {
+    showUnreachable();
+    if (stream) stream.close();
+    openStream(); // its first snapshot restores the page
+  }
+
   function openStream() {
     clearTimeout(reopenTimer);
     stream = new EventSource("/events?" + view);
-    stream.onmessage = (event) => snapshot(JSON.parse(event.data).regions);
+    heard(); // a connection that never delivers is as lost as one that stops
+    stream.onmessage = (event) => {
+      heard();
+      snapshot(JSON.parse(event.data).regions);
+    };
+    stream.addEventListener("heartbeat", (event) => {
+      silenceMs = JSON.parse(event.data).deadline * 1000;
+      heard();
+    });
     stream.onerror = () => {
       if (document.hidden || !stream) return;
       if (stream.readyState !== EventSource.CLOSED) {
         showUnreachable(); // the browser reconnects; its first message restores the page
         return;
       }
+      clearTimeout(silenceTimer);
       stream = null;
       fetchRegions().then((ok) => {
         if (ok) startPolling();
@@ -168,6 +224,7 @@
     if (stream) stream.close();
     stream = null;
     clearTimeout(reopenTimer);
+    clearTimeout(silenceTimer);
     clearTimeout(pollTimer);
     pollTimer = null;
   }
@@ -202,11 +259,32 @@
     openStream();
   });
 
-  function flash(text) {
+  function flash(text, code) {
     const box = document.querySelector("[data-flash]");
     if (!box) return;
     box.textContent = text;
+    if (code) box.dataset.code = code;
+    else delete box.dataset.code;
     box.hidden = false;
+  }
+
+  function noteSubmission(id) {
+    ownSubmissions.add(id);
+    if (ownSubmissions.size > OWN_LIMIT) ownSubmissions.delete(ownSubmissions.values().next().value);
+    showOwnRefusals(); // in case its refusal arrived before this answer
+  }
+
+  // Flash, once, the worker's refusal of a submission this page made, wherever it sits among
+  // newer results; a region that already shows it (the Play banner, the Odds status, a
+  // Settings row) is enough.
+  function showOwnRefusals() {
+    const status = received.status && parse(received.status);
+    if (!status || !status.dataset.refused || !ownSubmissions.size) return;
+    for (const refused of JSON.parse(status.dataset.refused)) {
+      if (!ownSubmissions.delete(refused.id)) continue;
+      if (document.querySelector('[data-submission="' + CSS.escape(refused.id) + '"]')) continue;
+      flash(refused.text, refused.code);
+    }
   }
 
   document.addEventListener("click", (event) => {
@@ -228,9 +306,18 @@
     const submitter = event.submitter;
     if (submitter && submitter.name) body.append(submitter.name, submitter.value);
     pendingForms.add(form);
+    const posted = Object.fromEntries(body);
     fetch(action, { method: "POST", body, headers: { Accept: "application/json" }, credentials: "same-origin" })
       .then((response) => {
-        if (response.status === 202) return null;
+        if (response.status === 202) {
+          return response.json().then((answer) => {
+            if (form.id === "odds-editor") {
+              ownApply = { id: answer.submission_id, values: posted };
+              rebaseEditor(); // in case its verification arrived first
+            }
+            noteSubmission(answer.submission_id);
+          });
+        }
         return response.json().catch(() => ({})).then((answer) => {
           const here = location.pathname + location.search;
           if (answer.location && answer.location !== here) location.assign(answer.location);
@@ -256,6 +343,78 @@
     const submit = form.querySelector('[type="submit"]');
     const text = Array.from(submit.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
     if (text) text.textContent = "Add " + input.value + " credits";
+    scheduleAmountCheck();
+  }
+
+  function scheduleAmountCheck() {
+    clearTimeout(amountTimer);
+    const seq = ++amountSeq; // an answer for an older amount or snapshot is dropped
+    amountTimer = setTimeout(() => checkAmount(seq), AMOUNT_MS);
+  }
+
+  function checkAmount(seq) {
+    const sheet = region("add-credits");
+    const input = sheet && sheet.querySelector('[name="amount"]');
+    if (!input) return;
+    const query = new URLSearchParams(view);
+    query.set("amount", input.value);
+    fetch("/regions?" + query, { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((body) => body, () => {
+        flash("Could not check this amount with the server. Nothing was sent to the machine.");
+        return null;
+      })
+      .then((body) => {
+        const current = region("add-credits");
+        if (!body || seq !== amountSeq || awaiting || !current || !current.contains(input)) return;
+        // The typed amount keeps its value and its rendered default, so it stays an edit.
+        morph(current, parse(body.regions["add-credits"]),
+          (field, twin) => copyAttributes(field, twin, field === input ? ["value"] : []));
+      });
+  }
+
+  // Make element match fresh, its re-rendering, while every named form field inside it stays
+  // the same node, so its focus, caret, selection and typed value survive: adopt(field, twin)
+  // brings each field in line with its twin instead. Everything else is fresh's markup, and
+  // fields come in the same order in both, or the region is not a re-rendering of element.
+  function morph(element, fresh, adopt) {
+    copyAttributes(element, fresh, []);
+    const theirs = Array.from(fresh.children);
+    const kept = new Map(); // fresh's child -> element's child holding the same field
+    let last = -1;
+    for (const child of Array.from(element.children)) {
+      const named = child.matches(FIELD) ? child : child.querySelector(FIELD);
+      if (!named) continue;
+      const twin = fresh.querySelector('[name="' + CSS.escape(named.name) + '"]');
+      const at = twin ? theirs.findIndex((other) => other.contains(twin)) : -1;
+      if (at <= last || theirs[at].tagName !== child.tagName) {
+        throw new Error("the re-rendered region differs in shape around " + named.name);
+      }
+      last = at;
+      kept.set(theirs[at], child);
+    }
+    const keep = new Set(kept.values());
+    for (const node of Array.from(element.childNodes)) if (!keep.has(node)) node.remove();
+    let next = element.firstChild;
+    for (const node of Array.from(fresh.childNodes)) {
+      const mine = kept.get(node);
+      if (!mine) {
+        element.insertBefore(node, next);
+        continue;
+      }
+      next = mine.nextSibling;
+      if (mine.matches(FIELD)) adopt(mine, node);
+      else morph(mine, node, adopt);
+    }
+  }
+
+  function copyAttributes(target, source, skip) {
+    for (const { name } of Array.from(target.attributes)) {
+      if (!skip.includes(name) && !source.hasAttribute(name)) target.removeAttribute(name);
+    }
+    for (const { name, value } of Array.from(source.attributes)) {
+      if (!skip.includes(name)) target.setAttribute(name, value);
+    }
   }
 
   document.addEventListener("input", (event) => {
@@ -269,7 +428,42 @@
 
   // ---------- Odds editor ----------
 
+  // The editor region as last received names this page's apply as the one that committed the
+  // active profile: rebase the editor onto it in place. Each named field keeps its node; it
+  // takes its twin's attributes (data-base among them) and default value, and its twin's value
+  // too unless it has focus or was typed in since the apply. Everything else in the editor is
+  // the server's markup again, then the live change marks are worked out for the new baseline.
+  function rebaseEditor() {
+    const fresh = ownApply && received.editor && parse(received.editor);
+    if (!fresh || fresh.dataset.applied !== ownApply.id) return;
+    const posted = ownApply.values;
+    ownApply = null;
+    const element = region("editor");
+    if (!element) return;
+    morph(element, fresh, (field, twin) => {
+      const keepValue = field === document.activeElement || field.value !== posted[field.name];
+      const value = field.value;
+      copyAttributes(field, twin, ["value"]);
+      if (field.defaultValue !== twin.defaultValue) field.defaultValue = twin.defaultValue;
+      const wanted = keepValue ? value : twin.defaultValue;
+      if (field.value !== wanted) field.value = wanted;
+    });
+    shown.editor = received.editor;
+    for (const field of element.querySelectorAll(FIELD)) markEdit(field);
+    schedulePreview(); // the status, actions and preview for the new baseline
+  }
+
   function markEdit(field) {
+    if (field.name === "lines") {
+      const total = document.querySelector('[data-part="max-total-bet"]');
+      const lines = field.value.replace(/,/g, "").trim();
+      if (total) {
+        total.textContent = /^\d+$/.test(lines)
+          ? (Number(lines) * Number(total.dataset.perLine)).toLocaleString("en-US") + " credits"
+          : "—";
+      }
+      return;
+    }
     const cell = field.closest("td");
     if (!cell || !("base" in field.dataset)) return;
     if (!("serverChanged" in cell.dataset)) cell.dataset.serverChanged = cell.classList.contains("is-changed") ? "1" : "";

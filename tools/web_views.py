@@ -23,6 +23,7 @@ built from this module's own literals.
 from __future__ import annotations
 
 import html
+import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -67,7 +68,6 @@ F_AMOUNT = "amount"
 F_OUTCOME = "outcome"
 F_ON = "on"
 F_LINES = "lines"
-F_MAX_BET = "max_bet"
 
 # The expected values each action carries because admit compares them against fresh state.
 EXPECTED = MappingProxyType({
@@ -125,8 +125,10 @@ WITH_DOT = ' class="with-dot"'
 GAME_OVER = frozenset((OutcomeWord.PLAYED, OutcomeWord.HAPPENED))  # a page spin whose game ended
 CHECKED = frozenset((OutcomeWord.HAPPENED, OutcomeWord.NOTHING_CHANGED))  # settled after a lost reply
 SAID_NO = frozenset((OutcomeWord.REJECTED, OutcomeWord.REFUSED, OutcomeWord.NACKED))
-SPIN_STOPPED = frozenset((OutcomeWord.INTERRUPTED, OutcomeWord.FAULT))
+STOPPED = frozenset((OutcomeWord.INTERRUPTED, OutcomeWord.FAULT))  # the machine ended it unfinished
 NOT_APPLIED = frozenset((OutcomeWord.ABORTED, OutcomeWord.STAGING_ABANDONED, OutcomeWord.REFUSED))
+# An apply or restore that changed the profile: the worker journals a profile record beside it.
+PROFILE_CHANGED = frozenset((OutcomeWord.COMMITTED_VERIFIED, OutcomeWord.RESTORED))
 
 
 class FormError(ValueError):
@@ -149,6 +151,7 @@ class View:
     seen: str | None = None  # the submission ID of a result banner someone dismissed
     before: int | None = None  # Activity: list entries older than this journal seq
     draft: Mapping[str, str] | None = None  # Odds: editor fields of an unapplied draft
+    generation: int | None = None  # Odds: the profile generation the draft's form carries
 
 
 @dataclass(frozen=True)
@@ -171,13 +174,23 @@ def view_for(page: str | None, query: str) -> View:
         raise ValueError(f"unknown page {page!r}")
     sheet = values.get("sheet") if page == "play" else None
     before = values.get("before", "")
-    draft = {key: value for key, value in values.items() if _editor_field(key)} if page == "odds" else {}
+    drafted = _draft_view(values) if page == "odds" else View()
     return View(page=page, sheet=sheet if sheet in SHEETS else None,
                 rail_hidden=page == "play" and values.get("rail") == "hidden",
                 amount=values.get(F_AMOUNT) if sheet == "add-credits" else None,
                 seen=values.get("seen") or None,
                 before=int(before) if page == "activity" and before.isdigit() else None,
-                draft=MappingProxyType(draft) if draft else None)
+                draft=drafted.draft, generation=drafted.generation)
+
+
+def _draft_view(fields: Mapping[str, str]) -> View:
+    """The Odds view of a draft's form fields, posted to the preview or submitted by the
+    no-script Preview: its editor fields and the profile generation the form carries, which
+    its Apply is admitted for, never the snapshot's."""
+    draft = {key: value for key, value in fields.items() if _editor_field(key)}
+    if not draft:
+        return View(page="odds")
+    return View(page="odds", draft=MappingProxyType(draft), generation=_optional_int(fields.get(F_GENERATION)))
 
 
 def view_query(view: View) -> str:
@@ -234,7 +247,9 @@ def redirect_after(return_to: str | None, action: ws.Action, refusal: ws.Refusal
 
 def parse_draft(state: ws.MachineState, fields: Mapping[str, str]) -> Draft:
     """The editor's fields over the active profile, validated against the machine's caps.
-    Fields the form leaves out keep the active profile's values."""
+    Fields the form leaves out keep the active profile's values. The max bet per line is
+    always the active profile's: the editor shows it but has no field for it (decision-18,
+    the owner's ruling), so a posted max bet is never read."""
     fields = MappingProxyType({key: value for key, value in fields.items() if _editor_field(key)})
     base = None if state.profile is None else state.profile.profile
     if base is None:
@@ -247,8 +262,7 @@ def parse_draft(state: ws.MachineState, fields: Mapping[str, str]) -> Draft:
         payouts = tuple(_replace_award(payout, _field_int(fields, f"award-{index}", payout.award,
                                                           f"Award {index + 1}"))
                         for index, payout in enumerate(base.payouts))
-        profile = sp.Profile(_field_int(fields, F_LINES, base.lines, "Paylines"),
-                             _field_int(fields, F_MAX_BET, base.max_bet_per_line, "Max bet per line"),
+        profile = sp.Profile(_field_int(fields, F_LINES, base.lines, "Paylines"), base.max_bet_per_line,
                              weights, payouts)
         caps = {} if state.ext_info is None else state.ext_info.caps()
         sp.validate(profile, **caps)
@@ -258,8 +272,10 @@ def parse_draft(state: ws.MachineState, fields: Mapping[str, str]) -> Draft:
 
 
 def preview_regions(state: ws.MachineState, fields: Mapping[str, str]) -> dict[str, str]:
-    """The odds editor regions a draft changes, for POST /actions/preview."""
-    ctx = _Ctx(state, View(page="odds", draft=MappingProxyType(dict(fields))), (), _EPOCH)
+    """The odds editor regions a draft changes, for POST /actions/preview. Apply is admitted
+    for the generation the draft's form carries, as the apply POST itself will be, so a draft
+    kept across a profile change shows Apply refused as out of date."""
+    ctx = _Ctx(state, _draft_view(fields), (), _EPOCH)
     return {"odds-actions": _odds_actions(ctx), "odds-status": _odds_status(ctx),
             "preview": _preview_panel(ctx)}
 
@@ -304,11 +320,14 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class _Ctx:
-    """One render: the snapshot, the view and what several regions derive from them."""
+    """One render: the snapshot, the view and what several regions derive from them.
+    generation is the profile generation this render's forms carry and its controls are
+    admitted for: a draft's own (View.generation), else the snapshot's."""
 
     def __init__(self, state: ws.MachineState, view: View, entries: Sequence[Mapping[str, object]],
                  now: datetime):
         self.state, self.view, self.entries, self.now = state, view, entries, now
+        self.generation = view.generation if view.draft is not None else ws.profile_generation(state)
         self._admitted: dict[tuple, ws.Refusal | None] = {}
         self._catalogue: list[ws.Outcome] | None = None
         self._draft: Draft | None = None
@@ -318,7 +337,7 @@ class _Ctx:
         if key not in self._admitted:
             state = self.state
             self._admitted[key] = ws.admit(state, ws.Action(
-                name, "", MappingProxyType(params), profile_generation=ws.profile_generation(state),
+                name, "", MappingProxyType(params), profile_generation=self.generation,
                 bet_per_line=ws.chosen_bet(state), arm_id=ws.arm_identity(state)))
         return self._admitted[key]
 
@@ -337,8 +356,7 @@ class _Ctx:
     def form(self, act: Act, form_id: str, **extra: object) -> str:
         """A hidden form for act's buttons (form=form_id), with its expected values."""
         state = self.state
-        expected = {F_GENERATION: ws.profile_generation(state), F_BET: ws.chosen_bet(state),
-                    F_ARM: ws.arm_identity(state)}
+        expected = {F_GENERATION: self.generation, F_BET: ws.chosen_bet(state), F_ARM: ws.arm_identity(state)}
         values = {name: expected[name] for name in EXPECTED.get(act, ())}
         values.update(extra)
         values[F_RETURN] = view_url(View(page=self.view.page, sheet=self.view.sheet,
@@ -463,8 +481,9 @@ def _coins(bet: int) -> str:
     return _plural(bet, "coin")
 
 
-def _wager_text(state: ws.MachineState) -> str:
-    bet, total = ws.chosen_bet(state), ws.total_wager(state)
+def _wager_text(state: ws.MachineState, bet: int) -> str:
+    """bet per line on the active profile's lines, with the total wager in money."""
+    total = bet * state.profile.lines
     money = _dollars(total, state.cents_per_credit, cents=False)
     money = f"{SEP}{money}" if money else ""
     if state.profile.lines == 1:
@@ -491,6 +510,8 @@ def _query(view: View) -> dict[str, str]:
         query["before"] = str(view.before)
     if view.draft:
         query.update(view.draft)
+        if view.generation is not None:
+            query[F_GENERATION] = str(view.generation)
     return query
 
 
@@ -503,7 +524,7 @@ def _safe_path(target: str | None) -> bool:
 
 
 def _editor_field(key: str) -> bool:
-    return key in (F_LINES, F_MAX_BET) or bool(re.fullmatch(r"w-\d+-\d+|award-\d+", key))
+    return key == F_LINES or bool(re.fullmatch(r"w-\d+-\d+|award-\d+", key))
 
 
 def _amount(text: str) -> int | str:
@@ -598,7 +619,8 @@ def _status(ctx: _Ctx) -> str:
     cls = f" status-pill--{tone}" if tone else ""
     short_html = f'<span class="status-pill__short">{short}</span>' if short else ""
     detail_html = f'<span class="status-pill__detail">{detail}</span>' if detail else ""
-    return (f'<p class="status-pill{cls}" id="machine-status" data-region="status">'
+    return (f'<p class="status-pill{cls}" id="machine-status" data-region="status" '
+            f'data-refused="{_e(_refusals(state))}">'
             f'<span class="dot dot--{dot}"></span><span class="status-pill__main">{main}</span>'
             f'{short_html}{detail_html}</p>')
 
@@ -700,10 +722,15 @@ def _banner(ctx: _Ctx) -> str:
     return '<div id="play-status" data-region="banner" data-banner="none" hidden></div>'
 
 
-def _tag(kind: str, tone: str, icon: str, text: str, action: str = "", wrap: bool = False) -> str:
+def _tag(kind: str, tone: str, icon: str, text: str, action: str = "", wrap: bool = False,
+         attrs: str = "") -> str:
     cls = "armed-tag" + ("" if tone == "warn" else f" armed-tag--{tone}") + (" armed-tag--wrap" if wrap else "")
     return (f'<div class="{cls}" id="play-status" data-region="banner" data-banner="{kind}" '
-            f'data-tone="{tone}">{icon}<p class="armed-tag__text">{text}</p>{action}</div>')
+            f'data-tone="{tone}"{attrs}>{icon}<p class="armed-tag__text">{text}</p>{action}</div>')
+
+
+def _code_attr(code: Code | None) -> str:
+    return "" if code is None else f' data-code="{_e(code.value)}"'
 
 
 def _busy_mark(part: str, label: str) -> str:
@@ -749,10 +776,11 @@ def _banner_checking(ctx: _Ctx) -> str | None:
         reason = state.checking[families[0]].reason
         detail = f"{_e(reason)}. Nothing will be sent again. Reading the machine to see what happened…"
     paused = " and ".join(FAMILY_LABELS[family] for family in families)
+    fault = Family.EXTENSION in state.checking and ws.extension_fault(state)
     return _tag("checking", "warn", '<span class="dot dot--warn"></span>',
-                f"<strong>Checking what happened.</strong> {detail}"
+                f"<strong>Checking what happened.</strong> {detail}{_fault_text(fault)}"
                 f'<span class="armed-tag__more">{paused} wait until this is settled.</span>',
-                _busy_mark("check-progress", "Checking"), wrap=True)
+                _busy_mark("check-progress", "Checking"), wrap=True, attrs=_fault_attr(fault))
 
 
 def _banner_door(ctx: _Ctx) -> str | None:
@@ -779,15 +807,29 @@ def _banner_paused(ctx: _Ctx) -> str | None:
                 "Settings</a>.")
 
 
+def _spinning(state: ws.MachineState) -> bool:
+    """A game is running: this page's spin, or one started at the machine."""
+    return state.game_running or (state.in_progress is not None and state.in_progress.name is Act.SPIN)
+
+
+def _spin_bet(state: ws.MachineState) -> int | None:
+    """The bet per line of this page's spin in progress, as submitted. None for a game started
+    at the machine, whose wager the page never learns, and for a spin recovered from the
+    journal, which the snapshot names without its bet: the page's chosen bet is neither."""
+    action = state.in_progress
+    return action.bet_per_line if action is not None and action.name is Act.SPIN else None
+
+
 def _banner_running(ctx: _Ctx) -> str | None:
     state = ctx.state
     action = state.in_progress
-    if action is None:
-        return None
-    if action.name is Act.SPIN:
-        bet = action.bet_per_line or ws.chosen_bet(state)
+    if action is None or action.name is Act.SPIN:
+        if not _spinning(state):
+            return None
+        bet = _spin_bet(state)
+        wager = "" if bet is None else f" {_coins(bet)}."
         return _tag("spinning", "quiet", _icon("loader-circle", "icon icon--turning"),
-                    f"<strong>Spinning… {_coins(bet)}.</strong> Bet and Cash out wait until the reels stop.")
+                    f"<strong>Spinning…{wager}</strong> Bet and Cash out wait until the reels stop.")
     amount = action.params.get(F_AMOUNT)
     text = {Act.ADD_CREDITS: f"Adding {_n(amount)} credits…" if isinstance(amount, int) else "Adding credits…",
             Act.CASH_OUT: "Cashing out the whole balance…",
@@ -834,7 +876,11 @@ def _banner_result(ctx: _Ctx) -> str | None:
     if not state.results:
         return None
     result = state.results[0]
-    if result.submission_id == ctx.view.seen or result.state is not ResultState.DONE:
+    if result.submission_id == ctx.view.seen:
+        return None
+    if result.state is ResultState.REFUSED:
+        return _not_sent(ctx, result)
+    if result.state is not ResultState.DONE:
         return None
     money = state.cents_per_credit
     paid = None if result.evidence is None else result.evidence.paid
@@ -847,30 +893,83 @@ def _banner_result(ctx: _Ctx) -> str | None:
                     f"{_n(paid)} credits{dollars} went onto the machine.")
     if result.outcome in CHECKED:
         return _checked(ctx, result)
-    delta = abs(result.credits_delta or 0)
-    dollars = _dollars(delta, money, cents=False)
-    dollars = f" ({dollars})" if dollars else ""
-    balance = "" if state.credits is None else f"{SEP}balance now {_n(state.credits)}"
-    if result.action is Act.ADD_CREDITS and result.outcome is OutcomeWord.MOVED:
-        return _tag("credits-added", "ok", _icon("circle-check"),
-                    f"<strong>Added {_n(delta)} credits</strong>{dollars}{balance}")
-    if result.action is Act.CASH_OUT and result.outcome is OutcomeWord.MOVED:
+    if result.action in (Act.ADD_CREDITS, Act.CASH_OUT) and result.outcome is OutcomeWord.MOVED:
+        # The transfer's own amount; credits_delta also counts play at the machine meanwhile.
+        amount = result.transfer_credits
+        dollars = _dollars(amount, money, cents=False)
+        dollars = f" ({dollars})" if dollars else ""
+        balance = _balance(state)
+        if result.action is Act.ADD_CREDITS:
+            return _tag("credits-added", "ok", _icon("circle-check"),
+                        f"<strong>Added {_n(amount)} credits</strong>{dollars}{balance}")
         return _tag("cashed-out", "ok", _icon("banknote-arrow-up"),
-                    f"<strong>Cashed out {_n(delta)} credits</strong>{dollars}{balance}. "
+                    f"<strong>Cashed out {_n(amount)} credits</strong>{dollars}{balance}. "
                     "The whole balance left the machine.",
                     _ok_link(ctx, "cashed-out-dismiss", result.submission_id))
     if result.outcome in SAID_NO:
         reason = f" {_e(result.reason)}." if result.reason else ""
-        return _tag("refused", "danger", _icon("circle-alert"),
+        # A refusal that can follow a partial change (an extension FAULT) claims nothing.
+        unchanged = ws.changed_nothing(result)
+        after = " Nothing changed." if unchanged else " The page shows what the machine reports now."
+        return _tag("refused" if unchanged else "refused-unconfirmed", "danger", _icon("circle-alert"),
                     f"<strong>The machine said no to “{_e(ACTION_LABELS[result.action])}”.</strong>"
-                    f"{reason} Nothing changed.",
-                    _ok_link(ctx, "refused-dismiss", result.submission_id), wrap=True)
-    if result.outcome in SPIN_STOPPED:
+                    f"{reason}{after}",
+                    _ok_link(ctx, "refused-dismiss", result.submission_id), wrap=True,
+                    attrs=_status_attr(result))
+    if result.action is Act.SPIN and result.outcome in STOPPED:
         return _tag("interrupted", "warn", _icon("triangle-alert"),
                     "<strong>The spin didn't finish.</strong> The machine stopped the game; the "
                     "credits and meters show what it counted.",
                     _ok_link(ctx, "interrupted-dismiss", result.submission_id))
     return None
+
+
+def _balance(state: ws.MachineState) -> str:
+    return "" if state.credits is None else f"{SEP}balance now {_n(state.credits)}"
+
+
+def _not_sent(ctx: _Ctx, result: ws.ActionResult) -> str:
+    return _tag("not-sent", "danger", _icon("circle-alert"), _not_sent_text(result),
+                _ok_link(ctx, "not-sent-dismiss", result.submission_id), wrap=True, attrs=_not_sent_attrs(result))
+
+
+def _refused(ctx: _Ctx, acts: Sequence[Act]) -> ws.ActionResult | None:
+    """The newest result, when it is one of acts refused and nobody dismissed it."""
+    results = ctx.state.results
+    if not results:
+        return None
+    result = results[0]
+    if result.state is not ResultState.REFUSED or result.action not in acts or result.submission_id == ctx.view.seen:
+        return None
+    return result
+
+
+def _not_sent_words(result: ws.ActionResult) -> tuple[str, str]:
+    """A tap the page refused, at once or once the worker checked it again, as plain text:
+    the headline and the reason. Every refusal comes before a send, so nothing was sent."""
+    return f"“{ACTION_LABELS[result.action]}” wasn't sent.", f" {result.reason}." if result.reason else ""
+
+
+def _not_sent_text(result: ws.ActionResult) -> str:
+    head, reason = _not_sent_words(result)
+    return f"<strong>{_e(head)}</strong>{_e(reason)}"
+
+
+def _not_sent_attrs(result: ws.ActionResult) -> str:
+    """Marks an element showing a refused result: static/live.js flashes the refusal of its own
+    submission only when no element on the page shows it already."""
+    return f' data-result="not-sent"{_code_attr(result.code)} data-submission="{_e(result.submission_id)}"'
+
+
+def _refusals(state: ws.MachineState) -> str:
+    """The refused results in the ring as JSON, for static/live.js: a page shows the refusal of
+    a submission its own 202 answer named, however many results came after it."""
+    refused = []
+    for result in state.results:
+        if result.state is ResultState.REFUSED:
+            refused.append({"id": result.submission_id, "code": None if result.code is None else result.code.value,
+                            "text": "".join(_not_sent_words(result))})
+    return json.dumps(refused, ensure_ascii=False)
 
 
 def _checked(ctx: _Ctx, result: ws.ActionResult) -> str:
@@ -879,11 +978,12 @@ def _checked(ctx: _Ctx, result: ws.ActionResult) -> str:
     family = ws.FAMILIES.get(result.action)
     again = f" {FAMILY_LABELS[family]} work again." if family is not None else ""
     if result.outcome is OutcomeWord.HAPPENED:
-        delta = result.credits_delta
-        if result.action is Act.ADD_CREDITS and delta is not None and state.credits is not None:
-            what = f"credits went from {_n(state.credits - delta)} to {_n(state.credits)}."
-        elif result.action is Act.CASH_OUT and delta is not None:
-            what = f"{_n(abs(delta))} credits left the machine."
+        # The verified transfer's own amount, as the acknowledged banner shows it; the balance
+        # is the live reading, which may move after the transfer (play at the machine).
+        amount = result.transfer_credits
+        if result.action in (Act.ADD_CREDITS, Act.CASH_OUT) and amount is not None:
+            where = "went onto" if result.action is Act.ADD_CREDITS else "left"
+            what = f"{_n(amount)} credits {where} the machine{_balance(state)}."
         else:
             what = f"the machine did “{label}”."
         head = f"<strong>It went through:</strong> {what}"
@@ -932,7 +1032,7 @@ def _reels(ctx: _Ctx) -> str:
     spin = state.last_spin
     stops = spin.stops if spin is not None else (0,) * sp.REELS
     game = sp.installed_game()
-    spinning = state.in_progress is not None and state.in_progress.name is Act.SPIN
+    spinning = _spinning(state)
     cls = "reels"
     newest = state.results[0] if state.results else None
     if state.link is not Link.ONLINE:
@@ -988,7 +1088,7 @@ def _drawer_pull(ctx: _Ctx) -> str:
 def _meters(ctx: _Ctx) -> str:
     state = ctx.state
     offline = state.link is Link.OFFLINE
-    spinning = state.in_progress is not None and state.in_progress.name is Act.SPIN
+    spinning = _spinning(state)
     paid = 0 if state.last_spin is None or spinning else state.last_spin.paid
     cls = "meters" + (" meters--stale" if offline else "") + (" meters--big-paid" if paid >= 1000 else "")
     if state.credits is None:
@@ -1019,7 +1119,7 @@ def _meters(ctx: _Ctx) -> str:
 
 
 def _disabled(refusal: ws.Refusal | None) -> str:
-    return "" if refusal is None else f' disabled title="{_e(refusal.reason)}"'
+    return "" if refusal is None else f' disabled title="{_e(refusal.reason)}"{_code_attr(refusal.code)}'
 
 
 def _key(ctx: _Ctx, part: str, cls: str, icon: str, label: str, sub: str, refusal: ws.Refusal | None,
@@ -1046,13 +1146,15 @@ def _deck(ctx: _Ctx) -> str:
         _key(ctx, "max-bet", "key--max", _icon("chevrons-up"), "<span>Max</span> <span>bet</span>",
              _coins(top) if top else "", max_bet, "act-max-bet"),
     ]
-    if state.in_progress is not None and state.in_progress.name is Act.SPIN:
+    if _spinning(state):
+        spin_bet = _spin_bet(state)
+        wager = "" if spin_bet is None or profile is None else _wager_text(state, spin_bet)
         keys.append('<button class="key key--spin is-busy" type="button" disabled aria-busy="true" '
                     f'data-part="spin">{_icon("loader-circle", "icon icon--turning")}'
-                    f'<span class="key__label">Spinning</span><span class="key__sub">{_wager_text(state)}</span></button>')
+                    f'<span class="key__label">Spinning</span><span class="key__sub">{wager}</span></button>')
     else:
         keys.append(_key(ctx, "spin", "key--spin", _icon("flame", "icon icon--dark icon--spin"), "Spin",
-                         _wager_text(state) if profile is not None else "", spin, "act-spin"))
+                         _wager_text(state, bet) if profile is not None else "", spin, "act-spin"))
     keys.append(_key(ctx, "cash-out", "key--money key--cash", _icon("banknote-arrow-up"),
                      "<span>Cash</span> <span>out</span>", "Whole balance", cash_out, "act-cash-out"))
     limit = "" if state.aft is None else f"Up to {_n(state.aft.limit_credits)}"
@@ -1208,7 +1310,7 @@ def _counter(credits: int, count: int, word: str) -> str:
 
 def _rail_activity(ctx: _Ctx) -> str:
     items = []
-    for record in [r for r in ctx.state.log if _shown(r)][:RAIL_ENTRIES]:
+    for record in [r for r in ctx.state.log if shown(r)][:RAIL_ENTRIES]:
         _, what, where = _describe(record)
         items.append(f'<li class="mini-log__item"><span class="mini-log__time">{_entry_time(record)}</span>'
                      f'<span class="mini-log__what">{what}</span>'
@@ -1244,7 +1346,7 @@ _ACTION_ICONS = MappingProxyType({
 _SETTING_LABELS = MappingProxyType({"sound": "Sound", "bills": "Bill acceptor"})
 
 
-def _shown(record: Mapping[str, object]) -> bool:
+def shown(record: Mapping[str, object]) -> bool:
     """Whether Activity lists a journal record: never intents or upload steps (they hold
     request bytes), nor records another entry already tells."""
     kind = record.get("kind")
@@ -1258,8 +1360,7 @@ def _shown(record: Mapping[str, object]) -> bool:
             return False
         if action == Act.SPIN.value and result in GAME_OVER:
             return False  # the spin record tells the game
-        if action in (Act.APPLY_PROFILE.value, Act.RESTORE_STOCK.value) and result in (
-                OutcomeWord.COMMITTED_VERIFIED, OutcomeWord.RESTORED):
+        if action in (Act.APPLY_PROFILE.value, Act.RESTORE_STOCK.value) and result in PROFILE_CHANGED:
             return False  # the profile record tells the change
     return True
 
@@ -1413,9 +1514,8 @@ def _odds_actions(ctx: _Ctx) -> str:
     custom = state.profile is not None and state.profile.custom
     restore = ctx.admit(Act.RESTORE_STOCK) if custom else None
     apply = ctx.admit(Act.APPLY_PROFILE) if _changed_draft(ctx) is not None else None
-    restore_off = f' disabled title="{_e(restore.reason)}"' if restore else ("" if custom else " disabled")
-    apply_off = (f' disabled title="{_e(apply.reason)}"' if apply
-                 else ("" if _changed_draft(ctx) is not None else " disabled"))
+    restore_off = _disabled(restore) if restore else ("" if custom else " disabled")
+    apply_off = _disabled(apply) if apply else ("" if _changed_draft(ctx) is not None else " disabled")
     return (
         '<div class="tool-head__actions" data-region="odds-actions" data-draft>'
         f'<button class="btn btn--quiet" type="submit" form="act-restore-stock" data-part="restore-stock"'
@@ -1427,29 +1527,42 @@ def _odds_actions(ctx: _Ctx) -> str:
         f'{ctx.form(Act.RESTORE_STOCK, "act-restore-stock")}</div>')
 
 
-def _notice(tone: str, text: str) -> str:
+def _notice(tone: str, text: str, attrs: str = "") -> str:
     mark = (f'<span class="dot dot--{tone}"></span>' if tone == "warn"
             else _icon("circle-alert" if tone == "danger" else "circle-check"))
     cls = "notice notice--warn" if tone == "danger" else f"notice notice--{tone}"
-    return (f'<div class="{cls}" id="odds-status" data-region="odds-status" data-draft data-tone="{tone}">'
-            f'{mark}<p class="notice__text">{text}</p></div>')
+    return (f'<div class="{cls}" id="odds-status" data-region="odds-status" data-draft data-tone="{tone}"'
+            f'{attrs}>{mark}<p class="notice__text">{text}</p></div>')
 
 
 def _odds_status(ctx: _Ctx) -> str:
     state = ctx.state
     if Family.EXTENSION in state.checking:
+        fault = ws.extension_fault(state)
         return _notice("warn", "<strong>Checking what happened</strong>"
-                       f"{SEP}{_e(state.checking[Family.EXTENSION].reason)}. Odds changes wait until it is settled.")
+                       f"{SEP}{_e(state.checking[Family.EXTENSION].reason)}.{_fault_text(fault)} "
+                       "Odds changes wait until it is settled.", _fault_attr(fault))
     draft = ctx.draft()
-    if draft is not None and draft.problem is not None:
-        return _notice("danger", f"<strong>The machine would refuse this</strong>{SEP}{_e(draft.problem)}. "
-                       "Nothing was sent.")
     changed = _changed_draft(ctx)
+    if draft is not None and draft.problem is not None:
+        draft_text = f"<strong>The machine would refuse this</strong>{SEP}{_e(draft.problem)}. Nothing was sent."
+    elif changed is not None:
+        draft_text = f"<strong>Edited (not applied)</strong>{SEP}{_diff_text(state.profile.profile, changed, 'was')}."
+    else:
+        draft_text = ""
+    failed = _restore_failed(ctx)
+    if failed is not None:  # told whatever the draft holds; the draft is kept beside it
+        return _restore_failed_notice(failed, draft_text)
+    if draft is not None and draft.problem is not None:
+        return _notice("danger", draft_text)
+    refused = _refused(ctx, (Act.APPLY_PROFILE, Act.RESTORE_STOCK))
+    if refused is not None:
+        return _notice("danger", _not_sent_text(refused) + (f" {draft_text}" if draft_text else ""),
+                       _not_sent_attrs(refused))
     if changed is not None:
         blocked = ctx.admit(Act.APPLY_PROFILE)
         why = f" Can't apply now: {_e(blocked.reason)}." if blocked else ""
-        return _notice("warn", f"<strong>Edited (not applied)</strong>{SEP}"
-                       f"{_diff_text(state.profile.profile, changed, 'was')}.{why}")
+        return _notice("warn", f"{draft_text}{why}")
     result = state.results[0] if state.results else None
     if result is not None and result.state is ResultState.DONE and result.submission_id != ctx.view.seen:
         if result.action is Act.APPLY_PROFILE and result.outcome is OutcomeWord.COMMITTED_VERIFIED and state.profile:
@@ -1470,6 +1583,47 @@ def _odds_status(ctx: _Ctx) -> str:
                        "Restore stock game puts the stock game back.")
     return _notice("quiet", "<strong>Stock game, nothing changed.</strong> There is nothing to apply or "
                    "restore. Change a weight or an award and its effect shows in the preview.")
+
+
+def _restore_failed(ctx: _Ctx) -> ws.ActionResult | None:
+    """The newest result, when it is a restore the machine stopped (INTERRUPTED or FAULT,
+    reconciled) or said no to in its reply, and nobody dismissed it."""
+    results = ctx.state.results
+    result = results[0] if results else None
+    if (result is None or result.action is not Act.RESTORE_STOCK or result.state is not ResultState.DONE
+            or result.submission_id == ctx.view.seen):
+        return None
+    return result if result.outcome in STOPPED or result.outcome is OutcomeWord.REFUSED else None
+
+
+def _restore_failed_notice(result: ws.ActionResult, draft_text: str) -> str:
+    """A restore that ended without proof of stock. Only a refusal answered before any side
+    effect says nothing changed; otherwise STATUS, not this result, says which game is active
+    (the head above), so the notice claims neither restored nor unchanged (decision-20 r4)."""
+    unchanged = ws.changed_nothing(result)
+    if result.outcome is OutcomeWord.REFUSED:
+        reason = f"{SEP}{_e(result.reason)}" if result.reason else ""
+        head = f"<strong>The machine said no to “{_e(ACTION_LABELS[result.action])}”</strong>{reason}."
+    else:
+        head = f"<strong>The restore didn't finish</strong>{SEP}the machine stopped it partway."
+    tail = " Nothing changed." if unchanged else " The game shown above is what the machine reports now."
+    kind = "restore-refused" if unchanged else "restore-unfinished"
+    return _notice("danger", head + tail + (f" {draft_text}" if draft_text else ""),
+                   f' data-result="{kind}"{_status_attr(result)}')
+
+
+def _status_attr(result: ws.ActionResult) -> str:
+    """The extension's own reply status a result carries, as data-status."""
+    return "" if result.machine_status is None else f' data-status="{_e(result.machine_status.name)}"'
+
+
+def _fault_text(fault: bool | None) -> str:
+    return " The machine reports a fault; the page keeps checking." if fault else ""
+
+
+def _fault_attr(fault: bool | None) -> str:
+    """Marks a checking notice whose extension STATUS shows the fault flag (decision-20 r5)."""
+    return " data-fault" if fault else ""
 
 
 def _diff_text(old: sp.Profile, new: sp.Profile, word: str) -> str:
@@ -1517,7 +1671,8 @@ def _preview_panel(ctx: _Ctx) -> str:
             else "Stock vs " + " vs ".join(name.lower() for name, _, _ in rows[1:]) + ", per bet")
     hot: set[int] = set()
 
-    def table(caption: str, value: Callable[[sp.PreviewRow], str], is_hot: Callable[[sp.PreviewRow], bool]) -> str:
+    def table(figure: str, caption: str, value: Callable[[sp.PreviewRow], str],
+              is_hot: Callable[[sp.PreviewRow], bool]) -> str:
         body = []
         for name, previews, edited in rows:
             by_bet = {row.bet_per_line: row for row in previews}
@@ -1538,11 +1693,11 @@ def _preview_panel(ctx: _Ctx) -> str:
                 cells.append(f'<td class="{cls}">{value(row)}</td>' if cls else f"<td>{value(row)}</td>")
             row_cls = ' class="preview__stock"' if not edited and len(rows) > 1 else ""
             body.append(f'<tr{row_cls}><th scope="row">{_e(name)}</th>{"".join(cells)}</tr>')
-        return (f'<table class="preview"><caption class="preview__caption">{caption}</caption>'
+        return (f'<table class="preview" data-figure="{figure}"><caption class="preview__caption">{caption}</caption>'
                 f'<thead><tr><td></td>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>')
 
-    returns = table("Return", lambda row: _percent(row.nominal_return, 2), lambda row: row.nominal_return > 1)
-    hits = table("Hit rate", lambda row: _percent(row.hit_frequency, 1), lambda row: False)
+    returns = table("return", "Return", lambda row: _percent(row.nominal_return, 2), lambda row: row.nominal_return > 1)
+    hits = table("hit-rate", "Hit rate", lambda row: _percent(row.hit_frequency, 1), lambda row: False)
     warning = ""
     if hot:
         warning = (f'<p class="warning">{_icon("triangle-alert", alt="Warning")}Pays back more than it takes at '
@@ -1607,10 +1762,18 @@ def _editor(ctx: _Ctx) -> str:
         + "".join(f'<th scope="col">Reel {reel + 1}</th>' for reel in range(sp.REELS))
         + f'</tr></thead><tbody>{"".join(rows)}</tbody><tfoot><tr><th scope="row" class="reeltable__pos">Total</th>'
         f'{"".join(foot)}</tr></tfoot></table></section>')
-    return (f'<div class="tool-grid" data-region="editor">'
+    # The apply verified on the machine that committed the active profile, by submission ID:
+    # static/live.js rebases its draft onto this editor only when that apply is its own. An
+    # apply whose profile another has since replaced is not named, so a draft kept across
+    # that change stays at its own generation and Apply shows it out of date.
+    active = ws.profile_generation(state)
+    applied = next((r.submission_id for r in state.results if r.action is Act.APPLY_PROFILE
+                    and r.state is ResultState.DONE and r.outcome is OutcomeWord.COMMITTED_VERIFIED
+                    and r.generation is not None and r.generation == active), "")
+    return (f'<div class="tool-grid" data-region="editor" data-applied="{_e(applied)}">'
             f'<form id="odds-editor" class="tool-grid__form" method="post" '
             f'action="/actions/{Act.APPLY_PROFILE.value}" hidden>'
-            f'<input type="hidden" name="{F_GENERATION}" value="{_e(ws.profile_generation(state))}">'
+            f'<input type="hidden" name="{F_GENERATION}" value="{_e(ctx.generation)}">'
             f'<input type="hidden" name="{F_RETURN}" value="/odds"></form>'
             f'{reels}'
             f'<div class="tool-stack">{_paytable(ctx, base, stock, values, draft is not None)}'
@@ -1682,21 +1845,26 @@ def _paytable(ctx: _Ctx, base: sp.Profile, stock: sp.Profile, values: Mapping[st
 def _limits(ctx: _Ctx, base: sp.Profile, values: Mapping[str, str]) -> str:
     info = ctx.state.ext_info
     max_lines = info.max_lines if info is not None else sp.LINE_ROWS
-    max_bet = info.max_bet_per_line if info is not None else sp.BYTE_MAX
     max_total = info.max_total_bet if info is not None else sp.BYTE_MAX
     lines = values.get(F_LINES, str(base.lines))
-    bet = values.get(F_MAX_BET, str(base.max_bet_per_line))
-    total = (f"{int(lines) * int(bet):,} credits" if lines.isdigit() and bet.isdigit() else "—")
+    bet = base.max_bet_per_line  # fixed: shown, never edited (decision-18, the owner's ruling)
+    total = _max_total(lines, bet)
     return ('<section class="panel" aria-labelledby="limits-title"><div class="panel__head">'
             '<h2 class="panel__title" id="limits-title">Paylines &amp; bet limits</h2></div><div class="fields">'
             f'<label class="field"><span class="field__label">Paylines<span class="field__hint">up to {max_lines}'
             f'</span></span><input class="field__input" form="odds-editor" name="{F_LINES}" inputmode="numeric" '
             f'autocomplete="off" value="{_e(lines)}" data-base="{base.lines}"></label>'
-            f'<label class="field"><span class="field__label">Max bet per line<span class="field__hint">coins, 1 to '
-            f'{max_bet}</span></span><input class="field__input" form="odds-editor" name="{F_MAX_BET}" '
-            f'inputmode="numeric" autocomplete="off" value="{_e(bet)}" data-base="{base.max_bet_per_line}"></label>'
+            '<div class="field"><span class="field__label">Max bet per line<span class="field__hint">fixed'
+            f'</span></span><span class="field__value" data-part="max-bet-per-line">{_coins(bet)}</span></div>'
             f'<div class="field"><span class="field__label">Max total bet<span class="field__hint">up to '
-            f'{max_total}</span></span><span class="field__value">{total}</span></div></div></section>')
+            f'{max_total}</span></span><span class="field__value" data-part="max-total-bet" data-per-line="{bet}">'
+            f'{total}</span></div></div></section>')
+
+
+def _max_total(lines: str, bet: int) -> str:
+    """Max total bet for the paylines as typed; static/live.js writes the same as they change."""
+    text = lines.replace(",", "").strip()
+    return f"{int(text) * bet:,} credits" if text.isdigit() else "—"
 
 
 # ---------- Activity & meters ----------
@@ -1707,7 +1875,7 @@ def _activity_main(ctx: _Ctx, built: Mapping[str, str]) -> str:
 
 def _log(ctx: _Ctx) -> str:
     view = ctx.view
-    records = [record for record in ctx.entries if _shown(record)]
+    records = [record for record in ctx.entries if shown(record)]
     more = len(ctx.entries) > ACTIVITY_PAGE
     records = records[:ACTIVITY_PAGE] if more else records
     meta = "Earlier entries" if view.before is not None else "Newest first"
@@ -1862,7 +2030,16 @@ def _switch_row(ctx: _Ctx, key: str, icon: str, label: str, desc: str, act: Act,
                    '<span class="switch__knob"></span></button>')
     return (f'<div class="setting" id="setting-{key}"><span class="setting__icon">{_icon(icon)}</span>'
             f'<div class="setting__text"><h2 class="setting__label">{label}</h2><p class="setting__desc">{desc}</p>'
-            f'{extra_desc}</div><div class="setting__control">{control}{ctx.form(act, form_id)}</div></div>')
+            f'{extra_desc}{_setting_refused(ctx, act)}</div>'
+            f'<div class="setting__control">{control}{ctx.form(act, form_id)}</div></div>')
+
+
+def _setting_refused(ctx: _Ctx, act: Act) -> str:
+    refused = _refused(ctx, (act,))
+    if refused is None:
+        return ""
+    return (f'<p class="setting__desc"{_not_sent_attrs(refused)}>'
+            f'<span class="dot dot--danger"></span>{_not_sent_text(refused)}</p>')
 
 
 def _clock_row(ctx: _Ctx, saving: bool) -> str:
@@ -1890,7 +2067,8 @@ def _clock_row(ctx: _Ctx, saving: bool) -> str:
                    f'{_disabled(refusal)}>{_icon("refresh-cw")}Set to this computer</button>')
     return ('<div class="setting setting--clock" id="setting-clock">'
             f'<span class="setting__icon">{_icon("clock-3")}</span><div class="setting__text">'
-            f'<h2 class="setting__label">Machine clock</h2><p class="setting__clock">{shown}</p>{desc}</div>'
+            f'<h2 class="setting__label">Machine clock</h2><p class="setting__clock">{shown}</p>{desc}'
+            f'{_setting_refused(ctx, Act.CLOCK_SYNC)}</div>'
             f'<div class="setting__control">{control}{ctx.form(Act.CLOCK_SYNC, "act-clock-sync")}</div></div>')
 
 

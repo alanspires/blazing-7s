@@ -17,9 +17,13 @@ import threading
 from collections.abc import Callable, Iterator
 
 import pytest
+import sas_extension as se
+import web_app
 import web_control
 import web_state as ws
+import web_views as wv
 from sas_testing import EXTENSION_POLL, SPIN, FakeS6000
+from web_state import Act, Code
 
 try:
     from playwright.sync_api import Browser, Locator, Page, expect
@@ -36,19 +40,22 @@ AMOUNT = 25  # credits a test adds
 
 expect.set_options(timeout=GUARD_MS)
 
-# Counts the event-stream messages each page receives, and the regions each one carried. Its
-# listener is added when the stream is made, before live.js sets onmessage, so a count seen
-# by the test means live.js has already applied that message.
+# Counts the event-stream messages and heartbeats each page receives, and the regions each
+# message carried. Its listeners are added when the stream is made, before live.js adds its
+# own, so a count seen by the test means live.js has already handled that event.
 LIVE_PROBE = """
 (() => {
   const Native = window.EventSource;
-  window.__live = { snapshots: 0, regions: [] };
+  window.__live = { snapshots: 0, heartbeats: 0, regions: [] };
   window.EventSource = class extends Native {
     constructor(...args) {
       super(...args);
       this.addEventListener("message", (event) => {
         window.__live.regions.push(Object.keys(JSON.parse(event.data).regions));
         window.__live.snapshots += 1;
+      });
+      this.addEventListener("heartbeat", () => {
+        window.__live.heartbeats += 1;
       });
     }
   };
@@ -91,6 +98,12 @@ FIRST_PAYING_AWARD = """
 () => Array.from(document.querySelectorAll('input[name^="award-"]'))
   .find((el) => Number(el.value.replace(/,/g, "")) > 1).name
 """
+# The odds editor's fields whose value differs from the value they were rendered with.
+EDITED_FIELDS = """
+() => Array.from(document.getElementById("odds-editor").elements)
+  .filter((field) => field.tagName === "INPUT" && field.type !== "hidden" && field.value !== field.defaultValue)
+  .map((field) => [field.name, field.value, field.defaultValue])
+"""
 # Each page and sheet, and the part of it whose controls a person uses there: behind an open
 # sheet the page is covered on purpose.
 SCREENS = (("/", "body"), ("/odds", "body"), ("/activity", "body"), ("/settings", "body"),
@@ -100,16 +113,20 @@ SCREENS = (("/", "body"), ("/odds", "body"), ("/activity", "body"), ("/settings"
 
 class Machine(FakeS6000):
     """The combined fake machine, whose line can stop right after the request for one
-    extension op (`hold_after`) until `release`, so a test sees the page while the worker
-    waits on the machine."""
+    extension op (`hold_after`), or before its next send (`hold`), until `release`, so a test
+    sees the page while the worker waits on the machine. `stalled` is set once the worker is
+    waiting on a stopped line."""
 
     def __init__(self):
         super().__init__()
         self.hold_after: set[int] = set()
+        self.stalled = threading.Event()
         self._flowing = threading.Event()
         self._flowing.set()
 
     def send(self, first, rest):
+        if not self._flowing.is_set():
+            self.stalled.set()
         self._flowing.wait()
         super().send(first, rest)
         requests = self.extension.requests
@@ -117,7 +134,11 @@ class Machine(FakeS6000):
             self.hold_after.discard(requests[-1][0])
             self._flowing.clear()
 
+    def hold(self) -> None:
+        self._flowing.clear()
+
     def release(self) -> None:
+        self.stalled.clear()
         self._flowing.set()
 
     @property
@@ -152,12 +173,16 @@ class Pages:
         self.dialogs: list[str] = []
         self.errors: list[str] = []
 
-    def open(self, path: str, viewport: dict = LAPTOP, **options) -> Page:
+    def open(self, path: str, viewport: dict = LAPTOP, *, fake_clock: bool = False, **options) -> Page:
+        """fake_clock: the page's timers run on Playwright's clock, which keeps time but can
+        also be moved forward (page.clock.fast_forward)."""
         context = self.browser.new_context(base_url=self.site.url, viewport=viewport, **options)
         self.contexts.append(context)
         context.set_default_timeout(GUARD_MS)
         context.add_init_script(script=LIVE_PROBE)
         page = context.new_page()
+        if fake_clock:
+            page.clock.install()
         page.on("dialog", self._dialog)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         visit(page, path)
@@ -242,9 +267,13 @@ def machine_controls(page: Page) -> list[dict]:
     return page.evaluate(MACHINE_CONTROLS)
 
 
+def amount_field(page: Page) -> Locator:
+    return page.locator(f'[data-region="add-credits"] input[name="{wv.F_AMOUNT}"]')
+
+
 def add_credits(page: Page, amount: int) -> None:
     """Enter amount in the open Add credits sheet and tap its button."""
-    page.locator('[data-region="add-credits"] input[name="amount"]').fill(str(amount))
+    amount_field(page).fill(str(amount))
     part(page, "add-credits-submit").click()
 
 
@@ -325,6 +354,62 @@ def test_a_stopped_server_shows_unreachable_and_turns_every_control_off(site, pa
         assert not any(control["on"] for control in machine_controls(page)), page.url
 
 
+def test_a_server_gone_silent_without_closing_shows_unreachable_until_it_sends_again(site, pages, monkeypatch):
+    flowing = threading.Event()  # cleared: every event-stream write waits, and nothing closes
+    flowing.set()
+    write = web_app.Handler._frame
+
+    def held(handler: web_app.Handler, frame: bytes) -> None:
+        flowing.wait()
+        write(handler, frame)
+
+    monkeypatch.setattr(web_app.Handler, "_frame", held)
+    page = pages.open("/", fake_clock=True)
+    page.wait_for_function("() => window.__live.heartbeats > 0")  # the page knows its deadline
+    expect(part(page, "spin")).to_be_enabled()
+    try:
+        flowing.clear()
+        page.clock.fast_forward(int(web_app.KEEPALIVE * web_app.HEARTBEAT_PERIODS * 1000))
+        expect(banner(page)).to_have_attribute("data-banner", "unreachable")
+        page.wait_for_function(ALL_OFF)
+    finally:
+        flowing.set()
+    expect(banner(page)).not_to_have_attribute("data-banner", "unreachable")
+    page.wait_for_function(f"() => ({MACHINE_CONTROLS})().some((c) => c.on)")
+
+
+def test_an_edited_top_up_amount_stays_while_its_button_follows_the_machine_offline_and_back(site, pages):
+    page = pages.open("/?sheet=add-credits")
+    field, submit = amount_field(page), part(page, "add-credits-submit")
+    field.fill(str(AMOUNT))
+    field.blur()  # protected because it is edited, not merely because it has focus
+    expect(submit).to_be_enabled()
+
+    site.machine.power_off()
+    expect(banner(page)).to_have_attribute("data-banner", "offline")
+    expect(submit).to_be_disabled()
+    expect(field).to_have_value(str(AMOUNT))
+
+    site.machine.power_on()
+    expect(submit).to_be_enabled()
+    expect(field).to_have_value(str(AMOUNT))
+
+
+def test_correcting_an_over_limit_amount_makes_the_top_up_sendable_again(site, pages):
+    over = site.running.worker.snapshot().aft.limit_credits + 1
+    refused = ws.Action(Act.ADD_CREDITS, "", {wv.F_AMOUNT: over})
+    page = pages.open(wv.redirect_after("/", refused, ws.Refusal(Code.OVER_LIMIT, "", "")))
+    field, submit = amount_field(page), part(page, "add-credits-submit")
+    expect(submit).to_be_disabled()
+    expect(field).to_have_attribute("aria-invalid", "true")
+
+    field.fill(str(AMOUNT))
+    expect(submit).to_be_enabled()
+    expect(field).not_to_have_attribute("aria-invalid", "true")
+    expect(field).to_be_focused()  # the check never took the field away from the person typing
+    expect(field).to_have_value(str(AMOUNT))
+
+
 def test_a_live_update_leaves_an_edited_odds_draft_alone(site, pages):
     editing = pages.open("/odds")
     applying = pages.open("/odds")
@@ -343,6 +428,98 @@ def test_a_live_update_leaves_an_edited_odds_draft_alone(site, pages):
         "seen => window.__live.regions.slice(seen).some((names) => names.includes('editor'))", arg=seen)
     expect(head).not_to_have_text(shown)  # the update reached this page
     expect(weight).to_have_value(typed)  # and left the draft as it was
+    # The draft was made for the older profile, so Apply says so rather than offering a send
+    # the machine would refuse.
+    expect(part(editing, "apply-odds")).to_have_attribute("data-code", Code.OUT_OF_DATE.value)
+    expect(part(editing, "apply-odds")).to_be_disabled()
+
+
+def verified_applies(state: ws.MachineState) -> int:
+    return sum(1 for r in state.results if r.action is Act.APPLY_PROFILE
+               and r.state is ws.ResultState.DONE and r.outcome is ws.OutcomeWord.COMMITTED_VERIFIED)
+
+
+def test_after_its_own_apply_the_editor_starts_from_the_applied_profile(site, pages):
+    page = pages.open("/odds")
+    for applied in (1, 2):  # two applies in a row from one page, without a reload
+        award = page.locator(f'input[name="{page.evaluate(FIRST_PAYING_AWARD)}"]')
+        typed = whole(award.input_value()) - 1
+        award.fill(str(typed))
+        award.blur()
+        expect(part(page, "apply-odds")).to_be_enabled()
+        part(page, "apply-odds").click()
+        site.wait_for(lambda state, applied=applied: verified_applies(state) == applied)
+        generation = ws.profile_generation(site.running.worker.snapshot())
+        expect(page.locator(f'#odds-editor input[name="{wv.F_GENERATION}"]')).to_have_value(str(generation))
+        expect(award).to_have_attribute("data-base", str(typed))  # the applied award is the baseline
+        assert whole(award.input_value()) == typed
+        assert page.evaluate(EDITED_FIELDS) == []
+        expect(part(page, "apply-odds")).to_be_disabled()  # nothing left to apply
+    assert site.machine.sent_ops(se.Op.COMMIT_PROFILE) == 2
+
+
+def test_an_apply_verified_while_editing_rebases_the_editor_around_the_field_in_use(site, pages):
+    machine = site.machine
+    page = pages.open("/odds")
+    award = page.locator(f'input[name="{page.evaluate(FIRST_PAYING_AWARD)}"]')
+    applied = whole(award.input_value()) - 1
+    award.fill(str(applied))
+    award.blur()
+    expect(part(page, "apply-odds")).to_be_enabled()
+    machine.hold_after.add(se.Op.COMMIT_PROFILE)  # the read-back waits until the test releases it
+    part(page, "apply-odds").click()
+    assert machine.stalled.wait(GUARD)
+
+    weight = page.locator('input[name="w-0-0"]')  # the next edit, in progress as the apply verifies
+    base = weight.get_attribute("data-base")
+    typed = str(whole(weight.input_value()) + 1)
+    weight.fill(typed)
+    weight.evaluate("(el) => { el.setSelectionRange(0, 1); window.__inUse = el; }")
+    machine.release()
+    site.wait_for(lambda state: verified_applies(state) == 1)
+
+    generation = ws.profile_generation(site.running.worker.snapshot())
+    expect(page.locator(f'#odds-editor input[name="{wv.F_GENERATION}"]')).to_have_value(str(generation))
+    expect(award).to_have_attribute("data-base", str(applied))  # the applied award is the baseline
+    assert whole(award.input_value()) == applied
+    in_use = "(el) => [el === window.__inUse, el === document.activeElement, el.value, el.selectionStart, el.selectionEnd]"
+    assert weight.evaluate(in_use) == [True, True, typed, 0, 1]  # the same node, still being edited
+    expect(weight).to_have_attribute("data-base", base)
+    assert page.evaluate(EDITED_FIELDS) == [["w-0-0", typed, base]]  # an edit of the applied profile
+    assert machine.sent_ops(se.Op.COMMIT_PROFILE) == 1
+
+
+def test_a_spin_refused_after_its_202_shows_the_refusal_on_the_page_that_sent_it(site, pages):
+    machine = site.machine
+    spinning, betting = pages.open("/"), pages.open("/")
+    expect(part(spinning, "spin")).to_be_enabled()
+    expect(part(betting, "bet-one")).to_be_enabled()
+    machine.hold()  # the worker stops at its next send, so the spin waits in the queue
+    assert machine.stalled.wait(GUARD)
+    part(spinning, "spin").click()
+    site.wait_for(lambda state: any(r.action is Act.SPIN and r.state is ws.ResultState.QUEUED for r in state.results))
+    part(betting, "bet-one").click()  # the bet the queued spin carries is no longer the bet
+    site.wait_for(lambda state: any(r.action is Act.BET_ONE for r in state.results))
+    machine.release()
+
+    site.wait_for(lambda state: any(r.action is Act.SPIN and r.state is ws.ResultState.REFUSED
+                                    for r in state.results))
+    flash = spinning.locator("[data-flash]")
+    expect(flash).to_be_visible()
+    expect(flash).to_have_attribute("data-code", Code.OUT_OF_DATE.value)
+    assert site.running.worker.snapshot().results[0].action is Act.BET_ONE  # the refusal is not the newest
+    expect(betting.locator("[data-flash]")).to_be_hidden()  # only the page that sent it
+    assert machine.sent_ops(SPIN) == 0
+
+
+def test_max_total_bet_follows_the_paylines_at_the_fixed_max_bet(site, pages):
+    page = pages.open("/odds")
+    top = site.running.worker.snapshot().profile.max_bet_per_line
+    lines = site.running.worker.snapshot().ext_info.max_lines
+    expect(page.locator(f'input[name="{wv.F_LINES}"]')).to_be_editable()
+    assert page.locator('input[name="max_bet"]').count() == 0  # shown, not edited (decision-18)
+    page.locator(f'input[name="{wv.F_LINES}"]').fill(str(lines))
+    expect(part(page, "max-total-bet")).to_have_text(re.compile(rf"^{lines * top:,}\b"))
 
 
 def test_phone_play_shows_the_reels_readings_and_every_play_button_without_scrolling(site, pages):

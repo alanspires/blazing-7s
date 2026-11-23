@@ -1,4 +1,4 @@
-"""The web control page in Chromium (decision-2 r2, r7): the real web_app and web_worker,
+"""The web control page in Chromium: the real web_app and web_worker,
 started by web_control.start on an ephemeral loopback port, serving the combined fake machine
 (sas_testing.FakeS6000) with a temporary journal.
 
@@ -517,7 +517,7 @@ def test_max_total_bet_follows_the_paylines_at_the_fixed_max_bet(site, pages):
     top = site.running.worker.snapshot().profile.max_bet_per_line
     lines = site.running.worker.snapshot().ext_info.max_lines
     expect(page.locator(f'input[name="{wv.F_LINES}"]')).to_be_editable()
-    assert page.locator('input[name="max_bet"]').count() == 0  # shown, not edited (decision-18)
+    assert page.locator('input[name="max_bet"]').count() == 0  # shown, not edited
     page.locator(f'input[name="{wv.F_LINES}"]').fill(str(lines))
     expect(part(page, "max-total-bet")).to_have_text(re.compile(rf"^{lines * top:,}\b"))
 

@@ -300,7 +300,7 @@ def read_state(host: sas.Host, ext: se.Extension, *, pace: Pace, observe: Observ
 
 
 def transfer_checks(state: AftState) -> list:
-    """The checks both directions need (decision-3 r8, decision-7 r4). Registration need not
+    """The checks both directions need. Registration need not
     be enrolled: the cabinet runs at status 80 and transfers there with the key it reports."""
     lock, reg, latest = state.lock, state.registration, state.latest
     cpc = state.cents_per_credit
@@ -345,7 +345,7 @@ def deposit(host: sas.Host, credits: int, *, record: Record, pace: Pace,
 def cash_out(host: sas.Host, *, record: Record, pace: Pace, observe: Observe | None = None) -> TransferOutcome:
     """Move the whole cashable balance to the host. No cap is applied: the 74 transfer limit is
     the incoming one (Table 8.2b), and a refusal such as 84 is reported, never followed by a
-    partial attempt (decision-7 r6)."""
+    partial attempt."""
     state = read_aft_state(host, pace=pace, observe=observe)
     _admit(transfer_checks(state) + [
         Check("transfers to the host available", bool(_bits(state.lock["available_transfers"]) & TO_HOST),
@@ -366,7 +366,7 @@ def expected_deltas(kind: int, cents: int) -> dict:
 
 def reconcile_transfer(host: sas.Host, intent: dict, *, pace: Pace, observe: Observe | None = None) -> Reconciled:
     """What the recorded transfer did, from the 72 FE peek and the money meters against the
-    intent's baseline. A peek and meters that disagree are INCONSISTENT (decision-3 r4)."""
+    intent's baseline. A peek and meters that disagree are INCONSISTENT."""
     baseline, transaction_id = intent["baseline"], intent["transaction_id"]
     moved = expected_deltas(intent["type"], intent["cents"])
     unmoved = dict.fromkeys(IN_HOUSE, 0)

@@ -39,7 +39,7 @@ METERS = ws.Meters(coin_in=300, coin_out=120, jackpot=0, games_played=100, games
                    slot_door_opened=4, power_reset=9, in_house_in_cents=500000,
                    in_house_in_count=1, in_house_out_cents=0, in_house_out_count=0)
 DECK = ("bet-one", "max-bet", "spin", "cash-out", "add-credits")
-OLD_MAX_BET_FIELD = "max_bet"  # the editor's max bet field before decision-18 made it a fixed reading
+OLD_MAX_BET_FIELD = "max_bet"  # the editor's max bet field before it became a fixed reading
 DECK_ACTS = MappingProxyType({"bet-one": Act.BET_ONE, "max-bet": Act.MAX_BET, "spin": Act.SPIN,
                               "cash-out": Act.CASH_OUT, "add-credits": Act.ADD_CREDITS})
 

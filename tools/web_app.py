@@ -1,6 +1,6 @@
 """The web control page's HTTP adapter: a fixed-route threaded HTTP server.
 
-The adapter never touches the serial line (decision-1 r2). It reads the machine worker's
+The adapter never touches the serial line. It reads the machine worker's
 immutable snapshots (`worker.snapshot()`), waits for new ones (`worker.subscribe()`), hands
 actions to it (`worker.submit()`) and pages the journal's activity (`journal.entries()`).
 Rendering is web_views'; the routes are:
@@ -27,10 +27,10 @@ An action answers a JSON request (Accept: application/json, as live.js asks) wit
 from. The submission ID is the handle for the result in /state.json: nothing is resent when
 an answer goes missing.
 
-Admission at the edge (decision-1 r6, decision-6 r5): every request's Host header must name
+Admission at the edge: every request's Host header must name
 the listen address or an allowed host name at the listening port, and every POST's Origin
 (or, without one, its Referer) must be this same origin, which refuses cross-site and
-DNS-rebinding posts without logins or confirmations (R1). Bodies are bounded. Every
+DNS-rebinding posts without logins or confirmations. Bodies are bounded. Every
 connection has a socket timeout, so a stalled request or a client that stops reading its
 event stream frees its handler at that deadline. Handler threads are capped (an over-cap
 connection gets 503 and no thread), and so, separately, are event streams.
@@ -295,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
     def _heartbeat(self) -> None:
         # A keepalive comment and an event in one frame: EventSource never hands comments to
         # the page, which needs to see the stream is alive to notice a connection lost without
-        # a close (decision-1 r3).
+        # a close.
         deadline = self.server.keepalive * HEARTBEAT_PERIODS
         self._frame(b": keepalive\nevent: heartbeat\ndata: " + json.dumps({"deadline": deadline}).encode() + b"\n\n")
 

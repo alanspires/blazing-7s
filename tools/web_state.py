@@ -595,7 +595,7 @@ def public_view(state: MachineState) -> dict:
 
 def extension_fault(state: MachineState) -> bool | None:
     """The fault flag of the extension's last STATUS; None before STATUS was read. A pending
-    restore can stay ACCEPTED with it set (decision-20 r5): it is shown, never resolved."""
+    restore can stay ACCEPTED with it set: it is shown, never resolved."""
     return None if state.ext_status is None else state.ext_status.fault
 
 

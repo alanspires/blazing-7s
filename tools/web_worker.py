@@ -1,13 +1,13 @@
 """The web control page's machine worker: the one thread that talks to the machine.
 
-Only this module touches the serial `Line`, the SAS `Host` and the extension `Extension`
-(decision-1 r2). The HTTP threads use three calls: `snapshot()` for the immutable
+Only this module touches the serial `Line`, the SAS `Host` and the extension `Extension`.
+The HTTP threads use three calls: `snapshot()` for the immutable
 `web_state.MachineState` it publishes, `subscribe()` for a waiter that wakes on each new
 snapshot, and `submit(action)`, which admits an action at once against the snapshot and
 either queues it (bounded) or refuses it. Publishing swaps the snapshot under a lock and
-notifies waiters; it never waits on a subscriber (decision-6 r5).
+notifies waiters; it never waits on a subscriber.
 
-Wire pacing and schedule (decision-1 r4, decision-10 r2). `PacedLine` spaces every actual
+Wire pacing and schedule. `PacedLine` spaces every actual
 send POLL_INTERVAL after the previous one, whoever makes it: general polls, long polls and
 the host's own syncs, repeats and busy retries. A general poll is due GENERAL_POLL_GAP after
 the previous one; the slots between belong to the running operation's long polls. Due polls
@@ -25,9 +25,9 @@ upload's steps it checks instead that this upload may continue. A lost reply hol
 action's family as checking until a reconciler has read what happened; nothing is resent
 (.rules/sas-host-machine-tests.md, .rules/firmware-remote-control.md). Only a failed intent
 append proves nothing was sent; any later failed append keeps the intent open and its
-family held until the record is durable (decision-6 r4).
+family held until the record is durable.
 
-Link (decision-10 r1, r3). A run of unanswered general polls lasting OFFLINE_AFTER seconds,
+Link. A run of unanswered general polls lasting OFFLINE_AFTER seconds,
 with no other validated reply in it, marks the
 machine offline while the line stays open; an OSError from the line itself (SerialClosed
 included), which `PacedLine` raises as `LineLost`, closes the handle and reopens it through
@@ -551,7 +551,7 @@ class Worker:
             self._update(game_running=False)
             return
         if code == GAME_STARTED:
-            self._update(game_running=True)  # a game at the machine shows from its start (R2)
+            self._update(game_running=True)  # a game at the machine shows from its start
         event = {"kind": "event", "source": "machine", "code": code}
         if code in DOORS:
             door, is_open = DOORS[code]
@@ -676,7 +676,7 @@ class Worker:
             self._update(in_progress=None)
 
     def _derive_arm(self, status: se.MachineStatus) -> None:
-        """Armed or not comes from STATUS; the journal only names the arm (decision-8 r5)."""
+        """Armed or not comes from STATUS; the journal only names the arm."""
         record = self._arm_record
         state = record.get("state", ArmState.NONE.value)
         arm_id = record.get("arm_id")
@@ -845,7 +845,7 @@ class Worker:
         return refusal
 
     def _prepare(self, action: Action) -> None:
-        """Read fresh what admission needs (decision-3 r8, decision-6 r3)."""
+        """Read fresh what admission needs."""
         name = action.name
         if ws.FAMILIES.get(name) is Family.MONEY:
             credits, lock = self._read(sm.current_credits), self._read(sm.aft_lock)
@@ -921,7 +921,7 @@ class Worker:
         return record
 
     def _record_step(self, action: Action, step: dict) -> None:
-        """Before each upload step: this upload may continue (decision-6 r3), then the
+        """Before each upload step: this upload may continue, then the
         previous step's acknowledgement and this step are journaled."""
         upload = self._upload
         state = self._state
@@ -1037,7 +1037,7 @@ class Worker:
 
     def _ack_only(self, action: Action) -> None:
         """Sound and bills have no read-back: only an ACK attributable to this command
-        confirms it (decision-5). After a reply was lost, the fresh command waits for a
+        confirms it. After a reply was lost, the fresh command waits for a
         validated data reply (sas_machine.ack_boundary), so any late ACK has gone by."""
         name = ws.SETTING_NAMES[action.name]
         on = bool(action.params["on"])

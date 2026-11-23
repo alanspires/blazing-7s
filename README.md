@@ -153,7 +153,8 @@ To run the tests, build the firmware or connect to your own machine, see
   page at boot.
 - `tools/web_control_live_check.py` the scripted check of a running page against the real
   machine: reads state, plays one remote spin, adds a small top-up, and prints a redacted
-  record. It moves money; run it only with the owner's approval.
+  record. It moves real credits and plays a real game, which stay in the machine's
+  lifetime meters.
 - `tools/sas_profile.py` is the offline profile codec and nominal-math preview;
   `tools/sas_extension.py` implements capability discovery, exact-ID requests,
   verified profile transfer, selected outcomes, remote spins and diagnostic requests.

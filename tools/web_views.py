@@ -248,8 +248,8 @@ def redirect_after(return_to: str | None, action: ws.Action, refusal: ws.Refusal
 def parse_draft(state: ws.MachineState, fields: Mapping[str, str]) -> Draft:
     """The editor's fields over the active profile, validated against the machine's caps.
     Fields the form leaves out keep the active profile's values. The max bet per line is
-    always the active profile's: the editor shows it but has no field for it (decision-18,
-    the owner's ruling), so a posted max bet is never read."""
+    always the active profile's: the editor shows it but has no field for it, so a posted
+    max bet is never read."""
     fields = MappingProxyType({key: value for key, value in fields.items() if _editor_field(key)})
     base = None if state.profile is None else state.profile.profile
     if base is None:
@@ -1599,7 +1599,7 @@ def _restore_failed(ctx: _Ctx) -> ws.ActionResult | None:
 def _restore_failed_notice(result: ws.ActionResult, draft_text: str) -> str:
     """A restore that ended without proof of stock. Only a refusal answered before any side
     effect says nothing changed; otherwise STATUS, not this result, says which game is active
-    (the head above), so the notice claims neither restored nor unchanged (decision-20 r4)."""
+    (the head above), so the notice claims neither restored nor unchanged."""
     unchanged = ws.changed_nothing(result)
     if result.outcome is OutcomeWord.REFUSED:
         reason = f"{SEP}{_e(result.reason)}" if result.reason else ""
@@ -1622,7 +1622,7 @@ def _fault_text(fault: bool | None) -> str:
 
 
 def _fault_attr(fault: bool | None) -> str:
-    """Marks a checking notice whose extension STATUS shows the fault flag (decision-20 r5)."""
+    """Marks a checking notice whose extension STATUS shows the fault flag."""
     return " data-fault" if fault else ""
 
 
@@ -1847,7 +1847,7 @@ def _limits(ctx: _Ctx, base: sp.Profile, values: Mapping[str, str]) -> str:
     max_lines = info.max_lines if info is not None else sp.LINE_ROWS
     max_total = info.max_total_bet if info is not None else sp.BYTE_MAX
     lines = values.get(F_LINES, str(base.lines))
-    bet = base.max_bet_per_line  # fixed: shown, never edited (decision-18, the owner's ruling)
+    bet = base.max_bet_per_line  # fixed: shown, never edited
     total = _max_total(lines, bet)
     return ('<section class="panel" aria-labelledby="limits-title"><div class="panel__head">'
             '<h2 class="panel__title" id="limits-title">Paylines &amp; bet limits</h2></div><div class="fields">'

@@ -57,7 +57,7 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   action while a money intent is open; no extension mutation while an extension intent is
   open or STATUS shows ACCEPTED, except the firmware's own handoff for a correlated pending
   arm (exactly CANCEL_OUTCOME and the BET_SPIN bound to it).
-- A lost restore reply never closes `happened` (decision-20 r1): `restored` only on the
+- A lost restore reply never closes `happened`: `restored` only on the
   acknowledged restore's STATUS proof (`sas_extension.stock_restored`: matching OK, stock
   active, no fault); a matching INTERRUPTED or FAULT closes with that word and no profile
   record; still ACCEPTED holds the family checking, with STATUS's fault flag shown on the
@@ -75,7 +75,7 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   naming its intent is journaled before the outcome, the journal folds it onto the open
   intent, and the outcome's result carries the committed `generation`.
 - An `inconsistent` money, upload or restore result keeps the intent open and its family
-  held by design (decision-3 r4): no page control releases it. A restart, or a reconnect, re-runs
+  held by design: no page control releases it. A restart, or a reconnect, re-runs
   reconciliation from the journal; anything further is a person reading the machine and
   the journal, never an automatic send. An upload `pending` on a possible COMMIT holds
   every profile mutation and re-checks at each periodic refresh and reconnect; one with no
@@ -99,7 +99,7 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   snapshot's; a draft with no generation is admitted for none. `live.js` rebases its editor
   in place only onto its own apply verified at the active generation (`data-applied`),
   keeping every field node and the focused or post-apply-edited values. Its max bet per line is always the active profile's:
-  the editor shows it and has no field for it (decision-18, the owner's ruling).
+  the editor shows it and has no field for it.
 - A refusal by the worker after HTTP admission reaches people only through the `results`
   ring. The page that submitted it learns it by submission ID: the status region lists every
   refused result in the ring (`data-refused`), and `live.js` flashes, once and with its code,
@@ -122,7 +122,7 @@ this slice owns how the page schedules, admits, journals and reconciles them.
 ## Settings without read-back
 
 - Sound and bills have no SAS read-back; only an ACK attributable to the command confirms
-  them (decision-5, the owner's ruling). They are sent once with `retry=False`. A lost
+  them. They are sent once with `retry=False`. A lost
   reply makes the setting `unknown`, which survives restart through the journal; nothing
   resends on its own, and a person's next tap sends a fresh command for the target chosen
   (unknown settings show both On and Off).
@@ -135,7 +135,7 @@ this slice owns how the page schedules, admits, journals and reconciles them.
 
 ## Edge, configuration and privacy
 
-- No logins, roles or confirmations (R1). Safety at the edge is same-origin only: the
+- No logins, roles or confirmations. Safety at the edge is same-origin only: the
   `Host` header must be the `--listen` address or an `--allow-host` name at the bound port,
   and a POST's `Origin` (else `Referer`) must match it. Bodies, handler threads, event
   streams and the queue are bounded, and every connection has a socket deadline.

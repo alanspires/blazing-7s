@@ -42,6 +42,12 @@ SAS transport, `firmware-game.md` for native wagering/outcomes, and
   and interruption after transmission may mean the operation happened. Preserve
   `UncertainOutcome` and its ID; reconcile STATUS/readback, never auto-reissue with
   a new ID. Explicit repeat must use the exact latest request.
+- `Extension.mutate` is the one send edge: it runs the caller's `pace` seam, then
+  its `record` callback with the op, ID and exact request bytes, then the single
+  send; a raising `record` sends nothing. `upload` records one parent intent (its
+  `upload_id`, target CRC and the identity it replaces), then each BEGIN, CHUNK and
+  COMMIT step before that step's send. Every extension `Host` call is preceded by
+  `pace`, never interrupted by it.
 - ACCEPTED is pending, not completed. STATUS/exact repeat polls and journals a
   terminal action result. Pending actions block new mutations except an armed
   outcome's cancel/spin handoff. Boot marks interrupted actions INTERRUPTED and
@@ -69,7 +75,9 @@ SAS transport, `firmware-game.md` for native wagering/outcomes, and
 - Native consumers read two extra records: committed slots must contain 32 zero
   guard bytes beyond the wire payload, validated at boot and covered by slot CRC.
   Never publish pointers into an unguarded upload or scratch buffer.
-- Preview charges bet per line × lines and evaluates the fixed first line patterns
+- `sas_profile.score` is the one ordered, wager-aware scorer: preview, the
+  next-result catalogue (`build_catalogue`) and the web worker's winning name all
+  use it. Preview charges bet per line × lines and evaluates the fixed first line patterns
   in record order. A zero-award first match blocks later payouts and is not a hit.
   Progressive amounts are nominal record awards; external bonuses are excluded.
   Neither preview nor nominal caps proves actual external-award or cabinet safety.
@@ -119,6 +127,9 @@ SAS transport, `firmware-game.md` for native wagering/outcomes, and
 ## Verification and reporting
 
 - Upload success requires full byte readback, CRC and matching completed commit ID.
+  Restore success is `stock_restored`: STATUS shows the restore's own ID with OK, the
+  stock game active and no fault. Acknowledged and reconciled restores use this one
+  proof; a matching ACCEPTED is pending, and INTERRUPTED or FAULT may leave custom active.
   Bracket active-profile reads with stable generation/CRC/fault state. Stock download
   is the host's pinned personality model, not a live dump of native configuration.
   Custom/faulted SAS identity must not advertise the stock return percentage.

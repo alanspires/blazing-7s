@@ -21,6 +21,7 @@ POLL_TRIES = 3  # §3.2: the third consecutive identical poll is the final NACK
 # §2.3.1: the machine answers within 20 ms. A global poll gets no answer, but the S6000 missed
 # polls sent right after one; waiting out the window first made every poll answer.
 SYNC_SETTLE = 0.02
+POLL_INTERVAL = 0.25  # §2.3.3: no faster than one poll per 200 ms per machine
 
 LONG_POLL_ROM_SIGNATURE = 0x21
 NACK_FLAG = 0x80  # Table 7.4b: a type S poll is ACKed with the address, NACKed with address | 0x80

@@ -1,5 +1,11 @@
+import io
 import json
+import os
+import sys
+import types
 import unittest
+from contextlib import redirect_stderr
+from unittest import mock
 
 import sas
 import sas_commands as sc
@@ -43,7 +49,7 @@ class EchoLine(FakeLine):
 class EveryCommandTest(unittest.TestCase):
     def test_each_long_poll_sends_its_values_and_reports_the_reply(self):
         for command in sc.COMMANDS.values():
-            if command.name in sas.SPECIAL:
+            if command.name in sas.SPECIAL or command.name == "set-date-time":  # verified by 7E: ClockTest
                 continue
             with self.subTest(command.name):
                 texts, expected_request = sample_values(command.request)
@@ -135,6 +141,84 @@ class SpecialCommandTest(unittest.TestCase):
     def test_selftest_passes_only_on_its_own_echo(self):
         self.assertEqual(run_cli(["selftest"], FakeLine())[0], 1)
         self.assertEqual(run_cli(["selftest"], EchoLine())[0], 0)
+
+
+class ClockTest(unittest.TestCase):
+    DATE, TIME = "11022026", "201530"
+
+    def test_set_date_time_sends_one_7f_and_succeeds_when_7e_confirms(self):
+        for name in ("set-date-time", "7F", "0x7F"):
+            with self.subTest(name=name):
+                machine = FakeS6000()
+                code, _, _ = run_cli([name, self.DATE, self.TIME], machine)
+                self.assertEqual(code, 0)
+                self.assertEqual(machine.messages(), [
+                    bytes((protocol.SYNC_POLL,)),
+                    protocol.with_crc(bytes((ADDRESS, 0x7F)) + bytes.fromhex(self.DATE + self.TIME)),
+                    bytes((ADDRESS, 0x7E)),
+                ])
+                self.assertEqual(machine.machine_time.strftime("%m%d%Y%H%M%S"), self.DATE + self.TIME)
+
+    def test_set_date_time_fails_without_resending_when_7e_does_not_confirm(self):
+        machine = FakeS6000()
+        machine.clock_writable = False
+        code, _, _ = run_cli(["set-date-time", self.DATE, self.TIME], machine)
+        self.assertEqual(code, 1)
+        self.assertEqual(sum(m[1:2] == b"\x7f" for m in machine.messages()), 1)
+
+    def test_an_impossible_time_is_a_usage_error_before_the_port_opens(self):
+        def open_line(port: str):
+            raise AssertionError(f"opened {port}")
+
+        with self.assertRaises(SystemExit) as exit_, redirect_stderr(io.StringIO()):
+            sas.main(["--port", "<serial-device>", "set-date-time", "13452026", self.TIME], open_line=open_line)
+        self.assertEqual(exit_.exception.code, 2)
+
+
+class PipePort:
+    """The read end of a pipe in place of pyserial's port: its descriptor is what SerialLine
+    reads, so end of file behaves as a hung-up adapter's does."""
+
+    def __init__(self, fd: int):
+        self.fd = fd
+        self.closed = False
+
+    def fileno(self) -> int:
+        return self.fd
+
+    def close(self) -> None:
+        os.close(self.fd)
+        self.closed = True
+
+
+class SerialLineTest(unittest.TestCase):
+    def open_line(self) -> tuple[sas.SerialLine, int]:
+        """A SerialLine built by its own constructor over a pipe, and the pipe's write end."""
+        read_end, write_end = os.pipe()
+        serial = types.ModuleType("serial")
+        serial.EIGHTBITS, serial.STOPBITS_ONE = 8, 1
+        serial.Serial = lambda device, baud, **options: PipePort(read_end)
+        with mock.patch.dict(sys.modules, {"serial": serial}):
+            line = sas.SerialLine("<serial-device>")
+        self.addCleanup(lambda: line.port.closed or line.close())
+        return line, write_end
+
+    def test_end_of_file_after_readiness_raises_serial_closed_with_or_without_a_partial_frame(self):
+        for partial in (b"", bytes((ADDRESS, 0x1A, 0x00))):
+            with self.subTest(partial=partial.hex()):
+                line, write_end = self.open_line()
+                os.write(write_end, partial)
+                os.close(write_end)
+                with self.assertRaises(sas.SerialClosed) as caught:
+                    line.read_message(protocol.Host.RESPONSE_TIMEOUT)
+                self.assertIsInstance(caught.exception, OSError)
+                line.close()
+                self.assertTrue(line.port.closed)
+
+    def test_an_open_line_with_nothing_to_read_is_silence(self):
+        line, write_end = self.open_line()
+        self.addCleanup(os.close, write_end)
+        self.assertEqual(line.read_message(0), b"")
 
 
 class ErrorTest(unittest.TestCase):

@@ -1,4 +1,6 @@
 # Direct dependencies for firmware tests; lock with:
 #   uv pip compile --python-version 3.12 --generate-hashes requirements.in -o requirements.txt
+playwright==1.65.2
 pytest==9.1.1
+pytest-playwright==0.10.0
 unicorn==2.1.4

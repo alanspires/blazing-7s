@@ -52,3 +52,5 @@ jobs:
           python3 -m unittest test_sas_protocol test_sas_commands test_sas_cli
           test_sas_write_test test_sas_money_test test_bsg_frame test_sas_profile
           test_sas_extension test_sas_commission test_privacy_check
+          test_sas_machine test_web_journal test_web_state test_web_worker
+          test_web_views test_web_app test_web_control_live_check

@@ -1,0 +1,86 @@
+{
+  "format": "s6000-web-control-live-check/1",
+  "captured_date": "2026-11-23",
+  "scope": "Owner-approved R16 live check of the web control page against the real machine: the page ran on the SAS host bound to loopback and tools/web_control_live_check.py drove it over HTTP. Each run plays one remote spin at the page's chosen bet and then adds 10 credits by AFT in-house transfer through the page. No settings, profile, outcome or cash-out actions.",
+  "evidence_kind": "The live check's own stdout records (allowlisted semantic fields only) and the pre-credit step's record. No URL, raw HTTP, serial bytes, host, user, device or path.",
+  "runs": [
+    {
+      "name": "pre-credit",
+      "why": "The machine read 0 credits, so with the owner's approval the page first added 10 credits through its own Add credits, verified from /state.json.",
+      "record": {
+        "step": "pre-credit",
+        "credits": 10,
+        "passed": true,
+        "outcome": "moved",
+        "credits_delta": 10,
+        "in_house_in_cents_delta": 1000,
+        "in_house_out_cents_delta": 0
+      }
+    },
+    {
+      "name": "run 1",
+      "why": "Spin verified. The top-up was refused at the page's admission with nothing sent: right after a game the machine briefly stops offering transfers to the machine (AFT available-transfers), and this version of the check posted the top-up at once.",
+      "record": {
+        "date": "2026-11-23",
+        "failure": {
+          "ambiguous": false,
+          "code": "aft_unavailable",
+          "http_status": 409,
+          "problem": "refused",
+          "step": "top_up"
+        },
+        "online": true,
+        "passed": false,
+        "spin": {
+          "bet_per_line": 3,
+          "credits_delta": -3,
+          "games_played_delta": 1,
+          "outcome": "played",
+          "paid": 0,
+          "total_wager": 3
+        },
+        "start": {
+          "coin_in": 1022,
+          "coin_out": 1899,
+          "credits": 10,
+          "games_played": 357,
+          "in_house_in_cents": 601500
+        },
+        "top_up": null
+      }
+    },
+    {
+      "name": "run 2",
+      "why": "With the owner's approval, the check (now waiting, reading only, until the page admits the top-up) ran once more and passed every step.",
+      "record": {
+        "date": "2026-11-23",
+        "failure": null,
+        "online": true,
+        "passed": true,
+        "spin": {
+          "bet_per_line": 3,
+          "credits_delta": -3,
+          "games_played_delta": 1,
+          "outcome": "played",
+          "paid": 0,
+          "total_wager": 3
+        },
+        "start": {
+          "coin_in": 1025,
+          "coin_out": 1899,
+          "credits": 7,
+          "games_played": 358,
+          "in_house_in_cents": 602500
+        },
+        "top_up": {
+          "credits": 10,
+          "credits_delta": 10,
+          "in_house_in_cents_delta": 1000,
+          "in_house_out_cents_delta": 0,
+          "outcome": "moved"
+        }
+      }
+    }
+  ],
+  "result": "passed"
+}

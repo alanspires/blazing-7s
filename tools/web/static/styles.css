@@ -1,0 +1,2325 @@
+/* Blazing 7s control page, direction D: Machine mirror, take B: Remote in your hand.
+   Phone first. Below 720px Play is a one-screen remote: reels on top, a thumb deck
+   pinned to the bottom edge, meters and activity in a pull-up sheet. From 720px it is
+   a centred device panel beside a quiet side panel. Tool pages widen at 640px and 1024px. */
+
+/* The system's faces, shipped with the page (Latin sets; fonts/README.md) so phones
+   and browsers without them installed show the intended type. */
+@font-face {
+  font-family: "Lato";
+  font-weight: 400;
+  font-display: swap;
+  src: local("Lato Regular"), url("fonts/LatoLatin-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lato";
+  font-weight: 700;
+  font-display: swap;
+  src: local("Lato Bold"), url("fonts/LatoLatin-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lato";
+  font-weight: 900;
+  font-display: swap;
+  src: local("Lato Black"), url("fonts/LatoLatin-Black.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "URW Gothic";
+  font-weight: 700;
+  font-display: swap;
+  src: local("URW Gothic Demi"), url("fonts/URWGothic-Demi.woff2") format("woff2");
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--type-body-font-family);
+  font-size: var(--type-body-font-size);
+  font-weight: var(--type-body-font-weight);
+  line-height: var(--type-body-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+p,
+ol,
+ul,
+dl,
+dd {
+  margin: 0;
+}
+
+ol,
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+img {
+  display: block;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Shared type ---------- */
+
+.brand__name,
+.mirror__game,
+.panel__title,
+.tray__title,
+.armed-tag__big {
+  font-family: var(--type-title-font-family);
+  font-size: var(--type-title-font-size);
+  font-weight: var(--type-title-font-weight);
+  letter-spacing: var(--type-title-letter-spacing);
+  line-height: var(--type-title-line-height);
+}
+
+.panel__title--page {
+  font-size: var(--size-xxl);
+}
+
+/* Short lines that may wrap once: split them evenly rather than leave one word behind. */
+.mirror__game,
+.mini-log__what {
+  text-wrap: balance;
+}
+
+.meter__label,
+.last-spin__label,
+.combo-group__title,
+.rail-block__title,
+.amount__label,
+.preview__caption,
+.preview thead th,
+.reeltable thead th,
+.paytable thead th,
+.log__day {
+  font-family: var(--type-label-font-family);
+  font-size: var(--type-label-font-size);
+  font-weight: var(--type-label-font-weight);
+  letter-spacing: var(--type-label-letter-spacing);
+  line-height: var(--type-label-line-height);
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.meter__value,
+.rail-count__value {
+  font-family: var(--type-figure-font-family);
+  font-size: var(--type-figure-font-size);
+  font-weight: var(--type-figure-font-weight);
+  line-height: var(--type-figure-line-height);
+}
+
+.mirror__spec,
+.meter__sub,
+.panel__meta,
+.tray__hint,
+.mirror__note,
+.panel__about,
+.setting__desc,
+.log-empty__text {
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+  text-wrap: pretty;
+}
+
+/* ---------- Icons (Lucide draws in black; light them for the dark UI) ---------- */
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  filter: invert(1);
+  opacity: 0.78;
+}
+
+.icon--s {
+  width: 14px;
+  height: 14px;
+}
+
+.icon--dark {
+  filter: none;
+  opacity: 1;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--radius-pill);
+}
+
+.dot--ok {
+  background: var(--color-ok);
+}
+
+.dot--warn {
+  background: var(--color-warn);
+}
+
+/* ---------- Top bar: one compact row at every width ---------- */
+
+.topbar {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
+}
+
+/* Phone: name over status on the left, four icon tabs on the right. */
+.topbar__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand nav"
+    "status nav";
+  align-items: center;
+  column-gap: var(--space-s);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--space-2xs) var(--space-s) var(--space-2xs) var(--space-l);
+}
+
+.brand {
+  grid-area: brand;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brand__sub {
+  display: none;
+  font-size: var(--size-xs);
+  color: var(--color-ink-faint);
+}
+
+.nav {
+  grid-area: nav;
+  display: flex;
+  gap: var(--space-2xs);
+}
+
+.nav__link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-xs);
+  border-bottom: 2px solid transparent;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.nav__link:hover {
+  color: var(--color-ink);
+}
+
+.nav__link.is-current {
+  border-bottom-color: var(--color-ink);
+  color: var(--color-ink);
+}
+
+.nav__link.is-current .icon {
+  opacity: 1;
+}
+
+.status-pill {
+  grid-area: status;
+  align-self: start;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.status-pill__main {
+  font-weight: var(--weight-bold);
+  color: var(--color-ok);
+}
+
+.status-pill__short,
+.status-pill__detail,
+.status-pill__rest {
+  display: none;
+}
+
+/* ---------- Page frame ---------- */
+
+.main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--space-l) var(--space-l) var(--space-3xl);
+}
+
+/* ---------- Play: the remote ---------- */
+
+.play {
+  display: grid;
+  gap: var(--space-xl);
+}
+
+.mirror__head,
+.panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-m);
+}
+
+.mirror__note {
+  text-align: center;
+}
+
+.window-stack,
+.fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.reel-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-s);
+  padding: var(--space-s);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-l);
+}
+
+.reels {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-s);
+  padding: 0 var(--space-l);
+}
+
+/* Drawn behind the reels, so it shows in the gaps and as a mark at each end. */
+.payline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-line-strong);
+  transform: translateY(-50%);
+}
+
+.payline__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 22px;
+  border-radius: var(--radius-s);
+  background: var(--color-line-strong);
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  color: var(--color-ink);
+}
+
+/* Phone rows share out whatever height the screen leaves; the payline row gets most. */
+.reel {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+}
+
+.reel__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.reel__cell--line {
+  background: var(--color-surface-raised);
+  border-top: 1px solid var(--color-line-strong);
+  border-bottom: 1px solid var(--color-line-strong);
+}
+
+/* Neighbours above and below the payline: smaller and one flat grey, whatever the
+   symbol, so only the payline row carries colour. */
+.reel__cell--edge .sym {
+  transform: scale(0.62);
+}
+
+/* Reel symbols, drawn like the cabinet's strips: red seven, white seven, BAR blocks, blank. */
+
+.sym {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+}
+
+.sym__seven {
+  font-family: var(--font-display);
+  font-size: var(--size-jumbo);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+  color: var(--color-ink);
+}
+
+.sym--b7 .sym__seven {
+  color: var(--color-accent);
+}
+
+.reel__cell--edge .sym__seven {
+  color: var(--color-ink-faint);
+}
+
+.reel__cell--edge .sym__bar {
+  background: var(--color-ink-faint);
+}
+
+.sym__bar {
+  display: block;
+  width: 64px;
+  padding: var(--space-2xs) 0;
+  border-radius: var(--radius-s);
+  background: var(--color-ink);
+  font-size: var(--size-xs);
+  font-weight: var(--weight-black);
+  line-height: var(--line-tight);
+  letter-spacing: var(--type-label-letter-spacing);
+  color: var(--color-surface-sunken);
+  text-align: center;
+}
+
+.sym--mini {
+  width: 18px;
+  height: 20px;
+}
+
+.sym--mini .sym__seven {
+  font-size: var(--size-l);
+}
+
+.sym--mini .sym__bar {
+  width: 16px;
+  height: 3px;
+  padding: 0;
+}
+
+.sym--mini.sym--blank::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-s);
+}
+
+.strip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: none;
+}
+
+.reel-window__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s);
+  padding-left: var(--space-xs);
+}
+
+.last-spin {
+  min-width: 0;
+  text-wrap: balance;
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+}
+
+.last-spin__reels {
+  display: none;
+}
+
+.drawer-pull {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-s);
+  flex: none;
+  min-height: 40px;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  font-weight: var(--weight-bold);
+}
+
+.drawer-pull:hover {
+  border-color: var(--color-ink-faint);
+}
+
+.drawer-pull.is-open,
+.key.is-open {
+  background: var(--color-surface);
+  border-color: var(--color-ink-muted);
+}
+
+/* Armed next result: a small tag on the reel window. */
+
+.armed-tag,
+.notice--warn,
+.notice--ok,
+.notice--quiet {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-m);
+  background: var(--color-tint-warn);
+}
+
+.armed-tag__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+}
+
+.armed-tag__text strong,
+.status-pill--warn .status-pill__main {
+  color: var(--color-warn);
+}
+
+.armed-tag__cancel {
+  flex: none;
+  padding: var(--space-xs) var(--space-m);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-s);
+  font-size: var(--size-s);
+  font-weight: var(--weight-bold);
+  color: var(--color-warn);
+}
+
+.armed-tag__cancel:hover {
+  background: var(--color-tint-warn);
+}
+
+/* Trays: the Next result drawer under the reel window, the Add credits tray under the deck.
+   On the phone both rise as bottom sheets instead. */
+
+.tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-l);
+  padding: var(--space-l);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-l);
+  background: var(--color-surface-sunken);
+}
+
+.tray__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-m);
+}
+
+.tray__hint {
+  margin-top: var(--space-xs);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.combo-groups,
+.preview-grid {
+  display: grid;
+  gap: var(--space-l);
+}
+
+.mirror,
+.combo-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-s);
+  min-width: 0;
+}
+
+.combo-group__title {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-s);
+}
+
+.combo-group__meta {
+  font-weight: var(--weight-regular);
+  text-transform: none;
+}
+
+.combo-list,
+.tool-head__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.combo-list + .combo-group__title {
+  margin-top: var(--space-m);
+}
+
+.combo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-m);
+  min-height: 52px;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  transition: border-color var(--duration-fast);
+}
+
+.combo:hover,
+.armed-tag--quiet,
+.notice--quiet {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+.combo__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-wrap: balance;
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+}
+
+.combo__sub {
+  font-size: var(--size-s);
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-faint);
+}
+
+.combo__pays {
+  font-family: var(--font-display);
+  font-size: var(--size-l);
+  font-weight: var(--weight-bold);
+  color: var(--color-win);
+  white-space: nowrap;
+}
+
+.combo__pays--none {
+  font-family: var(--font-ui);
+  font-size: var(--size-s);
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-faint);
+}
+
+/* Meters: credit / bet / paid as one slim strip, values in the display face. */
+
+.meters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-sunken);
+}
+
+.meters .meter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "label sub"
+    "value value";
+  align-items: baseline;
+  column-gap: var(--space-s);
+  padding: var(--space-xs) var(--space-s) var(--space-s) var(--space-m);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.meters .meter + .meter {
+  border-left: 1px solid var(--color-line);
+}
+
+.meters .meter__label {
+  grid-area: label;
+}
+
+.meters .meter__value {
+  grid-area: value;
+}
+
+.meters .meter__sub {
+  grid-area: sub;
+  justify-self: end;
+  font-size: var(--size-xs);
+  text-align: right;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-sunken);
+}
+
+.meter__value--zero,
+.meters--stale .meter__value {
+  color: var(--color-ink-faint);
+}
+
+/* Thumb deck: bet keys on the left, money keys on the right, Spin between them. */
+
+.deck {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    "bet spin cash"
+    "max spin add";
+  gap: var(--space-s);
+}
+
+.mtiles,
+.chips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-s);
+}
+
+.key {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon sub";
+  align-content: center;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-s);
+  min-height: 64px;
+  padding: var(--space-s);
+  border: 1px solid var(--color-line-strong);
+  border-bottom-width: 4px;
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.key:hover {
+  background: var(--color-line);
+}
+
+.key .icon {
+  grid-area: icon;
+  width: 18px;
+  height: 18px;
+}
+
+.key__label {
+  grid-area: label;
+  font-size: var(--size-m);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--type-label-letter-spacing);
+  line-height: var(--line-tight);
+  text-transform: uppercase;
+}
+
+/* Two-word labels stack until the keys are wide enough for one line. */
+.key__label span {
+  display: block;
+}
+
+.key__sub {
+  grid-area: sub;
+  font-size: var(--size-xs);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+}
+
+.key--bet {
+  grid-area: bet;
+}
+
+.key--max {
+  grid-area: max;
+}
+
+.key--cash {
+  grid-area: cash;
+}
+
+.key--add {
+  grid-area: add;
+}
+
+.key--spin {
+  grid-area: spin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  text-align: center;
+}
+
+.key--spin:hover,
+.key--main:hover {
+  background: var(--color-accent-strong);
+}
+
+.key--spin .icon {
+  width: 24px;
+  height: 24px;
+}
+
+.key--spin .key__label {
+  font-size: var(--size-xxl);
+}
+
+.key--spin .key__sub,
+.key--main .key__sub {
+  color: var(--color-on-accent);
+}
+
+/* The pull tab on the phone dock that raises Meters & activity. */
+
+.dock__handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-m) 0 var(--space-2xs);
+  font-size: var(--size-s);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+}
+
+.dock__handle::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-line-strong);
+  transform: translateX(-50%);
+}
+
+.dock__handle:hover {
+  color: var(--color-ink);
+}
+
+/* Add credits tray */
+
+.credit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-m);
+}
+
+.amount {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-m);
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.amount__label {
+  width: 100%;
+}
+
+.amount__input {
+  width: 5ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: var(--size-hero);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+}
+
+.amount__unit {
+  color: var(--color-ink-muted);
+}
+
+.chip {
+  min-height: 40px;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+}
+
+.chip.is-on {
+  border-color: var(--color-ink);
+  background: var(--color-surface-raised);
+}
+
+/* Buttons on tool pages and trays */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-s);
+  min-height: 40px;
+  padding: var(--space-s) var(--space-l);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--color-ink-faint);
+}
+
+.btn--flame {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.btn--flame:hover {
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent-strong);
+}
+
+.btn--ink {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-bg);
+}
+
+.btn--wide {
+  width: 100%;
+  min-height: 48px;
+}
+
+/* Meters & activity: a pull-up sheet on the phone, a quiet side panel from 720px. */
+
+.rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-m);
+}
+
+.rail__note {
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+}
+
+/* The side panel's own buttons stay quiet until pointed at. */
+.icon-btn--quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+.icon-btn--quiet:hover {
+  border-color: var(--color-line);
+}
+
+.rail-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 96px;
+  padding: var(--space-m) var(--space-s);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  font-size: var(--size-s);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.rail-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-m);
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--color-line);
+}
+
+.kv {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.kv__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-m);
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.kv__row dt {
+  color: var(--color-ink-muted);
+}
+
+.kv__row dd {
+  font-weight: var(--weight-bold);
+  text-align: right;
+}
+
+.kv__row--stack {
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.kv__row--stack dd {
+  text-align: left;
+}
+
+.with-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-s);
+}
+
+.mini-log {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: var(--space-m);
+}
+
+.mini-log__item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  column-gap: var(--space-s);
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+}
+
+.mini-log__time {
+  grid-row: span 2;
+  color: var(--color-ink-faint);
+}
+
+.mini-log__where {
+  font-size: var(--size-xs);
+  color: var(--color-ink-faint);
+}
+
+.rail-count {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-s);
+  color: var(--color-ink-muted);
+}
+
+.rail-count__value {
+  color: var(--color-ink);
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  font-size: var(--size-s);
+  font-weight: var(--weight-bold);
+}
+
+.text-link:hover {
+  color: var(--color-ink-muted);
+}
+
+/* ---------- Tool pages: Odds & payouts, Activity, Settings ---------- */
+
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-l);
+}
+
+.tool-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-m);
+}
+
+.tool-head__title {
+  font-family: var(--font-display);
+  font-size: var(--size-xxl);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+}
+
+.tool-head__sub {
+  color: var(--color-ink-muted);
+}
+
+.tool-head__actions {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-s);
+  width: 100%;
+}
+
+.notice__text {
+  min-width: 0;
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-m);
+  min-width: 0;
+  padding: var(--space-l);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+}
+
+.panel__about {
+  max-width: 96ch;
+}
+
+/* Live preview */
+
+.preview,
+.reeltable,
+.paytable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.preview__caption {
+  padding-bottom: var(--space-xs);
+  text-align: left;
+}
+
+.preview th,
+.preview td {
+  padding: var(--space-s) var(--space-xs);
+  border-bottom: 1px solid var(--color-line);
+  text-align: right;
+}
+
+.preview tbody th {
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-muted);
+  text-align: left;
+}
+
+.preview__stock td {
+  font-size: var(--size-l);
+  color: var(--color-ink-muted);
+}
+
+.preview__edited,
+.preview__value {
+  font-family: var(--font-display);
+  font-size: var(--size-xl);
+  font-weight: var(--weight-bold);
+}
+
+.preview__edited.is-hot {
+  color: var(--color-warn);
+}
+
+.warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  font-weight: var(--weight-bold);
+  color: var(--color-warn);
+}
+
+.tool-grid {
+  display: grid;
+  gap: var(--space-l);
+  align-items: start;
+}
+
+.rail,
+.tool-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-l);
+  min-width: 0;
+}
+
+/* Reels and paytable tables */
+
+.reeltable th,
+.reeltable td,
+.paytable th,
+.paytable td {
+  padding: var(--space-xs);
+  border-bottom: 1px solid var(--color-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.reeltable {
+  table-layout: fixed;
+}
+
+.reeltable__pos {
+  width: 40px;
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-faint);
+}
+
+.reeltable tfoot th,
+.reeltable tfoot td {
+  border-bottom: 0;
+  font-weight: var(--weight-bold);
+}
+
+.reelcell__in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-s);
+}
+
+.reelcell__sym {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  min-width: 0;
+}
+
+.reelcell__name {
+  font-size: var(--size-s);
+  white-space: nowrap;
+}
+
+.weight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.weight__input,
+.award,
+.field__input {
+  padding: var(--space-xs) var(--space-s);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: var(--color-surface-raised);
+  text-align: right;
+}
+
+.weight__input {
+  width: 44px;
+}
+
+.award {
+  width: 100%;
+}
+
+.field__input {
+  width: 52px;
+}
+
+.reelcell.is-changed .weight__input,
+.reeltable__total.is-changed {
+  border-color: var(--color-warn);
+  color: var(--color-warn);
+}
+
+.weight__was {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-regular);
+  color: var(--color-warn);
+  white-space: nowrap;
+}
+
+.paytable th:not(:first-child),
+.paytable td {
+  width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.paycombo,
+.setting__desc {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+}
+
+.paycombo .strip {
+  display: none;
+}
+
+.paycombo__name {
+  display: flex;
+  flex-direction: column;
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+}
+
+.paycombo__odds {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-faint);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-m);
+  min-height: 48px;
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.field:last-child {
+  border-bottom: 0;
+}
+
+.field__label {
+  display: flex;
+  flex-direction: column;
+  color: var(--color-ink-muted);
+}
+
+.field__hint {
+  font-size: var(--size-s);
+  color: var(--color-ink-faint);
+}
+
+.field__value {
+  font-weight: var(--weight-bold);
+}
+
+/* Activity log */
+
+.tool--split {
+  display: grid;
+  align-items: start;
+}
+
+.log__day {
+  display: flex;
+  gap: var(--space-s);
+  padding-top: var(--space-s);
+  color: var(--color-ink-muted);
+}
+
+.log__date {
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-faint);
+}
+
+.log,
+.settings {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-line);
+}
+
+/* The time column has a fixed width so every entry's where-tag lines up. */
+.log__entry {
+  display: grid;
+  grid-template-columns: 28px 56px minmax(0, 1fr);
+  grid-template-areas:
+    "icon what what"
+    "icon time where";
+  align-items: center;
+  justify-items: start;
+  gap: var(--space-xs) var(--space-s);
+  padding: var(--space-s) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.log__time {
+  grid-area: time;
+  font-size: var(--size-s);
+  color: var(--color-ink-faint);
+  white-space: nowrap;
+}
+
+.log__icon {
+  grid-area: icon;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-s);
+  background: var(--color-surface-raised);
+}
+
+.log__what {
+  grid-area: what;
+  min-width: 0;
+  text-wrap: balance;
+}
+
+.log__end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-s);
+  padding: var(--space-m) 0 var(--space-xs);
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-ink-faint);
+  text-align: center;
+}
+
+.won {
+  font-weight: var(--weight-bold);
+  color: var(--color-win);
+}
+
+.where {
+  grid-area: where;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xs) var(--space-s);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  font-size: var(--size-xs);
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.rail-tab:hover,
+.where--page,
+.armed-tag--quiet .armed-tag__cancel {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink);
+}
+
+.meter--wide {
+  grid-column: 1 / -1;
+}
+
+/* Settings */
+
+.setting {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-areas:
+    "icon text"
+    ". control";
+  align-items: center;
+  gap: var(--space-m);
+  padding: var(--space-l) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.setting:last-child {
+  border-bottom: 0;
+}
+
+.setting__icon {
+  grid-area: icon;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.setting__text {
+  grid-area: text;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.rail__title,
+.setting__label,
+.log-empty__title {
+  font-family: var(--type-heading-font-family);
+  font-size: var(--type-heading-font-size);
+  font-weight: var(--type-heading-font-weight);
+  line-height: var(--type-heading-line-height);
+}
+
+.setting__clock {
+  font-family: var(--font-display);
+  font-size: var(--size-xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+}
+
+.setting__control {
+  grid-area: control;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-m);
+}
+
+.setting__state {
+  min-width: 120px;
+  font-weight: var(--weight-bold);
+}
+
+.switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+}
+
+.switch.is-on {
+  border-color: var(--color-ok);
+  background: var(--color-ok);
+}
+
+.switch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--color-ink-muted);
+  transition: transform var(--duration-fast);
+}
+
+.switch.is-on .switch__knob {
+  transform: translateX(20px);
+  background: var(--color-bg);
+}
+
+/* ---------- Phone: Play is one screen ---------- */
+
+@media (max-width: 719px) {
+  /* The reels take whatever height the top bar and the thumb deck leave. */
+  .page-play {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 600px;
+  }
+
+  .main--play {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    padding: var(--space-m) 0 0;
+  }
+
+  .play,
+  .mirror,
+  .window-stack,
+  .reel-window {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .mirror__head {
+    padding: 0 var(--space-l);
+  }
+
+  .window-stack {
+    padding: 0 var(--space-m);
+  }
+
+  .reels {
+    flex: 1 1 auto;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .reel__cell--line .sym {
+    transform: scale(1.3);
+  }
+
+  .reel__cell--edge .sym {
+    transform: scale(0.8);
+  }
+
+  .dock {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-s);
+    padding: 0 var(--space-m) var(--space-m);
+    border-top: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    background: var(--color-surface);
+  }
+
+  .mirror__note,
+  .rail,
+  .rail-tab,
+  .rail__collapse,
+  .on-wide {
+    display: none;
+  }
+
+  /* Sheets rise over the remote; the screen behind stays put under a scrim. */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: var(--color-scrim);
+  }
+
+  .sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    padding-top: var(--space-s);
+    border: 1px solid var(--color-line-strong);
+    border-bottom: 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sheet);
+  }
+
+  .sheet::before {
+    content: "";
+    flex: none;
+    align-self: center;
+    width: 36px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-line-strong);
+  }
+
+  /* Long sheets start under the top bar and run as long as their content. */
+  .sheet--tall {
+    top: 96px;
+    min-height: calc(100% - 96px);
+  }
+
+  .sheet--short {
+    bottom: 0;
+  }
+
+  .rail.sheet {
+    display: flex;
+    padding: var(--space-s) var(--space-l) var(--space-xl);
+  }
+
+  /* Short meters pair up so the whole sheet fits one screen. */
+  .rail.sheet .kv {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-xl);
+  }
+
+  .rail.sheet .kv__row--stack {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- Tablet ---------- */
+
+@media (min-width: 640px) {
+  /* Play keeps its own frame: one screen below 720px, a device panel above. */
+  .main--tool {
+    padding: var(--space-xl) var(--space-xl) var(--space-3xl);
+  }
+
+  .preview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tool-head__actions {
+    flex-direction: row;
+    width: auto;
+  }
+
+  .reeltable th,
+  .reeltable td,
+  .paytable th,
+  .paytable td {
+    padding: var(--space-xs) var(--space-s);
+  }
+
+  .reelcell__in {
+    flex-wrap: nowrap;
+  }
+
+  /* Keeps every weight box on the cell's right edge, with "was 1" to its left. */
+  .weight {
+    flex-direction: row-reverse;
+  }
+
+  .paycombo .strip {
+    display: inline-flex;
+  }
+
+  .paytable th:not(:first-child),
+  .paytable td {
+    width: 84px;
+  }
+
+  .reeltable__pos {
+    width: 52px;
+  }
+
+  .log__entry {
+    grid-template-columns: 72px 28px minmax(0, 1fr) auto;
+    grid-template-areas: "time icon what where";
+    gap: var(--space-m);
+  }
+
+  .setting {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-areas: "icon text control";
+  }
+
+  .setting__control {
+    justify-content: flex-end;
+  }
+
+  .setting__state {
+    text-align: right;
+  }
+}
+
+/* ---------- From 720px: one-row top bar, Play as a device panel ---------- */
+
+@media (min-width: 720px) {
+  .topbar__inner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand nav status";
+    column-gap: var(--space-l);
+    padding: 0 var(--space-xl);
+  }
+
+  .brand,
+  .status-pill {
+    align-self: center;
+  }
+
+  .nav {
+    gap: var(--space-xs);
+  }
+
+  .nav__link {
+    flex-direction: row;
+    gap: var(--space-s);
+    padding: var(--space-m) var(--space-s);
+    font-size: var(--size-m);
+  }
+
+  .status-pill {
+    padding: var(--space-xs) var(--space-m);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-pill);
+    background: var(--color-surface-sunken);
+  }
+
+  .status-pill__short,
+  .status-pill__rest {
+    display: inline;
+  }
+
+  .main--play {
+    padding: var(--space-xl);
+  }
+
+  .play {
+    grid-template-columns: minmax(0, 1fr) 248px;
+    align-items: start;
+  }
+
+  .mirror {
+    gap: var(--space-l);
+    padding: var(--space-xl);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-l);
+    background: var(--color-surface);
+  }
+
+  .reel {
+    grid-template-rows: 60px 112px 60px;
+  }
+
+  .sym__bar {
+    width: 84px;
+    font-size: var(--size-s);
+  }
+
+  .last-spin__reels {
+    display: inline;
+  }
+
+  .armed-tag {
+    align-self: center;
+  }
+
+  .reel-window.is-drawer-open {
+    border-bottom-color: var(--color-line);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .tray--drawer {
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .dock {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-m);
+  }
+
+  .dock__handle,
+  .rail__close,
+  .rail__note,
+  .scrim,
+  .on-phone {
+    display: none;
+  }
+
+  /* With room to spare, each meter stacks like the cabinet's: label, figure, note.
+     The credit cell gets twice the width so a six-figure balance fits at full size. */
+  .meters {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .meters .meter {
+    grid-template-areas:
+      "label label"
+      "value value"
+      "sub sub";
+    padding: var(--space-s) var(--space-l) var(--space-m);
+  }
+
+  .meters .meter__value {
+    font-size: var(--size-hero);
+  }
+
+  .meters .meter__sub {
+    justify-self: start;
+    font-size: var(--size-s);
+    text-align: left;
+  }
+
+  .key {
+    min-height: 68px;
+    padding: var(--space-s) var(--space-m);
+  }
+
+  /* Collapsed: the device alone in the middle, the panel's tab beside it. */
+  .play--collapsed {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 440px) minmax(0, 1fr);
+  }
+
+  .play--collapsed .mirror {
+    grid-column: 2;
+  }
+
+  .rail-tab {
+    grid-column: 3;
+    justify-self: start;
+  }
+}
+
+/* ---------- Desktop ---------- */
+
+@media (min-width: 1024px) {
+  .brand__sub,
+  .status-pill__detail {
+    display: inline;
+  }
+
+  .status-pill__short {
+    display: none;
+  }
+
+  .nav__link {
+    padding: var(--space-m);
+  }
+
+  /* The device and its side panel are centred together as one group. */
+  .play {
+    grid-template-columns: minmax(0, 680px) 300px;
+    justify-content: center;
+    gap: var(--space-2xl);
+  }
+
+  .play--collapsed {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 680px) minmax(0, 1fr);
+  }
+
+  .reel {
+    grid-template-rows: 64px 116px 64px;
+  }
+
+  .reel__cell--line .sym {
+    transform: scale(1.2);
+  }
+
+  .combo-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The quick amounts sit in one row once the device panel is wide enough. */
+  .chips {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .deck {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+
+  .key__label {
+    font-size: var(--size-l);
+  }
+
+  .key__label span {
+    display: inline;
+  }
+
+  .tool-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+
+  .tool--split {
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: var(--space-xl);
+  }
+
+  .tool--settings {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+
+  .preview__edited,
+  .preview__value {
+    font-size: var(--size-xxl);
+  }
+}
+
+/* ---------- States: spin, win, blocked keys, checking, offline, saving ----------
+   Every Play state speaks from the slot above the reels (the armed-tag banner), and
+   the deck shows which keys are blocked and why. Kept last so state rules win over
+   the layout rules above at equal weight. */
+
+.dot--danger {
+  background: var(--color-danger);
+}
+
+/* Banner tones */
+
+.armed-tag--ok,
+.notice--ok {
+  border-color: var(--color-ok);
+  background: var(--color-tint-ok);
+}
+
+.armed-tag--win,
+.reels--win .reel__cell--line {
+  border-color: var(--color-win);
+  background: var(--color-tint-win);
+}
+
+.armed-tag--danger {
+  border-color: var(--color-danger);
+  background: var(--color-tint-danger);
+}
+
+.armed-tag--ok .armed-tag__text strong,
+.notice--ok strong {
+  color: var(--color-ok);
+}
+
+.armed-tag--win .armed-tag__text strong,
+.meter__value--win {
+  color: var(--color-win);
+}
+
+.armed-tag--danger .armed-tag__text strong,
+.status-pill--danger .status-pill__main,
+.amount.is-invalid .amount__input {
+  color: var(--color-danger);
+}
+
+.armed-tag--quiet .armed-tag__text strong {
+  color: var(--color-ink);
+}
+
+.armed-tag--ok .armed-tag__cancel {
+  border-color: var(--color-ok);
+  color: var(--color-ok);
+}
+
+.armed-tag--danger .armed-tag__cancel {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.armed-tag__big {
+  display: block;
+}
+
+#play-status .armed-tag__text {
+  text-wrap: balance;
+}
+
+/* Long banners on the phone: the text takes the full width, the button drops below it. */
+@media (max-width: 719px) {
+  .armed-tag--wrap {
+    flex-wrap: wrap;
+  }
+
+  .armed-tag--wrap .armed-tag__text {
+    flex-basis: calc(100% - 32px);
+  }
+
+  .armed-tag--wrap .armed-tag__cancel {
+    margin-left: auto;
+  }
+}
+
+.armed-tag__more {
+  display: block;
+  margin-top: var(--space-2xs);
+  color: var(--color-ink-muted);
+}
+
+/* A wait the page sits out on its own: shaped like the banner's button, never pressable. */
+.armed-tag__cancel.is-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  cursor: progress;
+}
+
+.icon--turning {
+  animation: turn 1.2s linear infinite;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon--turning {
+    animation: none;
+  }
+}
+
+/* Win: the payline row lights up in the win colour. */
+
+.reels--win .payline,
+.reels--win .payline__mark {
+  background: var(--color-win);
+}
+
+.reels--win .payline__mark {
+  color: var(--color-on-accent);
+}
+
+/* Spinning: symbols smeared along the strip, as a moving reel looks. */
+
+.reel--spinning .sym {
+  filter: blur(3px);
+  opacity: 0.6;
+}
+
+.reel--spinning .reel__cell--line .sym {
+  transform: scale(1.05, 1.7);
+}
+
+.reel--spinning .reel__cell--edge .sym {
+  transform: scale(0.62, 0.72);
+}
+
+/* A four-figure win needs more room than the paid cell's usual share on a tablet. */
+@media (min-width: 720px) and (max-width: 1023px) {
+  .meters--big-paid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 1.4fr);
+  }
+}
+
+/* Offline: last known values fade back so nobody reads them as live. */
+
+.reels--stale {
+  opacity: 0.45;
+}
+
+/* Blocked controls: flat and faint, the reason in the key's second line. */
+
+.key:disabled,
+.key[aria-disabled="true"],
+.drawer-pull[aria-disabled="true"],
+.btn:disabled {
+  border-color: var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-ink-faint);
+  cursor: not-allowed;
+}
+
+.key:disabled .icon,
+.key[aria-disabled="true"] .icon,
+.drawer-pull[aria-disabled="true"] .icon,
+.btn:disabled .icon {
+  opacity: 0.35;
+}
+
+.key:disabled .icon--dark,
+.key[aria-disabled="true"] .icon--dark,
+.btn:disabled .icon--dark {
+  filter: invert(1);
+}
+
+.key:disabled .key__sub,
+.key[aria-disabled="true"] .key__sub {
+  color: var(--color-ink-muted);
+}
+
+/* Spin while the machine plays the game: lit but hollow, and it ignores taps. */
+.key--spin.is-busy {
+  border-color: var(--color-accent);
+  background: var(--color-tint-accent);
+  color: var(--color-accent);
+  cursor: progress;
+}
+
+.key--spin.is-busy .key__label {
+  font-size: var(--size-l);
+}
+
+.key--spin.is-busy .icon {
+  opacity: 1;
+}
+
+/* With Spin unavailable, Add credits takes the flame as the screen's one main action. */
+.key--main {
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* Add credits: an amount over the machine's limit */
+
+.amount.is-invalid {
+  border-color: var(--color-danger);
+}
+
+/* Room for a five-figure amount; the approved field is sized for four figures. */
+.amount.is-invalid .amount__input {
+  width: 6ch;
+}
+
+.field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-s);
+  font-size: var(--size-s);
+  line-height: var(--line-snug);
+  color: var(--color-danger);
+}
+
+/* Settings: a change sent and waiting for the machine to answer */
+
+.switch.is-pending {
+  border-color: var(--color-warn);
+  background: var(--color-tint-warn);
+  cursor: progress;
+}
+
+.setting__state--pending {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-warn);
+}
+
+@media (min-width: 640px) {
+  .setting__state--pending {
+    justify-content: flex-end;
+  }
+}
+
+/* Activity: nothing logged yet */
+
+.log-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-s);
+  padding: var(--space-2xl) var(--space-l);
+  border-bottom: 1px solid var(--color-line);
+  text-align: center;
+}
+
+.log-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.log-empty__text {
+  max-width: 46ch;
+}
+
+.log-empty .btn {
+  margin-top: var(--space-s);
+}
+
+.armed-tag__link {
+  font-weight: var(--weight-bold);
+  text-decoration: underline;
+}
+
+/* ---------- Live page ----------
+   The served page posts actions, so a few links of the static design are buttons here;
+   they keep the link's look. */
+
+button.combo {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.combo:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.armed-tag__cancel {
+  background: none;
+  cursor: pointer;
+}
+
+button.armed-tag__cancel:disabled,
+button.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.setting__control .btn + .btn {
+  margin-left: var(--space-xs);
+}
+
+/* A refusal for the person who tapped: what the server said, near the top of the screen. */
+.flash {
+  position: fixed;
+  top: var(--space-l);
+  left: 50%;
+  z-index: 60;
+  max-width: min(90vw, 480px);
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  font-size: var(--size-s);
+  box-shadow: var(--shadow-sheet);
+  transform: translateX(-50%);
+}

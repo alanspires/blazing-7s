@@ -26,6 +26,12 @@ while every other request answered within tens of milliseconds (notes/firmware-b
 "Measured profile reply latency"). Those are single observations, not an upper bound:
 PROFILE_SWITCH_REPLY_TIMEOUT is the probe window that saw them, and a reply later than it
 is still UncertainOutcome, never a reason to send again.
+
+Two injected callables keep the caller in charge of the line. An Extension calls its `pace`
+before every SAS host call it makes, never inside one, so a caller can give other polls their
+turn between requests without splitting a retransmission sequence. Every mutation calls the
+`record` it is given with its identity and exact request bytes immediately before sending;
+when `record` raises, nothing is sent.
 """
 
 from __future__ import annotations
@@ -33,8 +39,9 @@ from __future__ import annotations
 import enum
 import struct
 import zlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from uuid import uuid4
 
 import sas_profile as sp
 import sas_protocol as sas
@@ -53,6 +60,11 @@ STATUS = struct.Struct("<QBBBIIB")
 ID = struct.Struct("<Q")
 ID_MAX = (1 << 64) - 1
 PROFILE_SWITCH_REPLY_TIMEOUT = 2.0  # seconds to the first reply byte; see the module notes
+UPLOAD_ID_LENGTH = 20  # hex digits of an upload's identity, as long as an AFT transaction ID
+UPLOAD_OP = "upload"  # the op of an upload's parent intent
+
+Record = Callable[[dict], None]
+Pace = Callable[[], None]
 
 
 class Op(enum.IntEnum):
@@ -214,10 +226,11 @@ def decode_reply(data: bytes | None, op: Op, id: int) -> tuple[Status, bytes]:
 
 
 class Extension:
-    """The extension's requests over a SAS host."""
+    """The extension's requests over a SAS host, calling `pace` before each host call."""
 
-    def __init__(self, host: sas.Host):
+    def __init__(self, host: sas.Host, *, pace: Pace):
         self.host = host
+        self.pace = pace
 
     def info(self) -> Info:
         return Info(*INFO.unpack(self._query(Op.INFO, b"", INFO.size)))
@@ -235,10 +248,14 @@ class Extension:
             data += self._query(Op.READ_PROFILE, READ_REQUEST.pack(len(data), count), count)
         return bytes(data)
 
-    def mutate(self, op: Op, id: int, payload: bytes = b"") -> Status:
-        """Send a mutation exactly once. Once its bytes may have reached the line, anything but
-        a valid reply is UncertainOutcome, an interrupt included."""
+    def mutate(self, op: Op, id: int, payload: bytes = b"", *, record: Record) -> Status:
+        """Send a mutation exactly once, after `record` has its op name, ID and exact request
+        bytes. Once its bytes may have reached the line, anything but a valid reply is
+        UncertainOutcome, an interrupt included."""
         request = encode_request(op, id, payload)  # a request that cannot be encoded is never sent
+        message = sas.with_crc(bytes((self.host.address, EXTENSION_POLL)) + request)
+        self.pace()
+        record({"op": op.name, "id": id, "request_hex": message.hex()})
         try:
             reply = self.host.long_poll(EXTENSION_POLL, request, retry=False,
                                         timeout=REPLY_TIMEOUTS.get(op))
@@ -247,6 +264,7 @@ class Extension:
             raise UncertainOutcome(op, id, e) from e
 
     def _query(self, op: Op, payload: bytes, size: int) -> bytes:
+        self.pace()
         reply = self.host.long_poll(EXTENSION_POLL, encode_request(op, 0, payload))
         status, data = self._check(reply, op, 0, size)
         if status != Status.OK:
@@ -277,29 +295,46 @@ def download(ext: Extension) -> tuple[sp.Profile, MachineStatus]:
     it, or the stock profile when the stock game is active."""
     info = ext.info()
     _check_geometry(info)
-    data, machine = _read_active(ext, info)
+    data, machine = read_active(ext, info)
     profile = sp.stock_profile() if data is None else sp.decode(data, **info.caps())
     return profile, machine
 
 
-def upload(ext: Extension, path: str) -> dict:
-    """Validate the JSON profile at path within the machine's caps, stage it in chunks of at
-    most INFO's max_chunk, commit it, and read the whole committed profile back."""
+def upload(ext: Extension, profile: sp.Profile, *, record: Record) -> dict:
+    """Validate the profile within the machine's caps, stage it in chunks of at most INFO's
+    max_chunk, commit it, and read the whole committed profile back.
+
+    This is the one owner of an upload's identity. Before BEGIN it reads STATUS for the
+    identity the upload replaces and records the parent intent once: the upload_id, the
+    target bytes, CRC-32 and length, every planned step and that previous identity. Each step
+    (BEGIN, each CHUNK, COMMIT) is then recorded, linked by upload_id, before it is sent,
+    so a lost reply names the exact upload and step."""
     info = ext.info()
     _require(info, Op.BEGIN_PROFILE)
     _check_geometry(info)
-    caps = info.caps()
-    data = sp.encode(sp.read_json(path, **caps), **caps)
+    data = sp.encode(profile, **info.caps())
     crc = zlib.crc32(data)
     offsets = range(0, len(data), info.max_chunk)
     ids = _ids(info, 2 + len(offsets))
-    _expect(ext, Op.BEGIN_PROFILE, next(ids), BEGIN_REQUEST.pack(len(data), crc))
-    for offset in offsets:
-        _expect(ext, Op.PROFILE_CHUNK, next(ids),
-                CHUNK_OFFSET.pack(offset) + data[offset:offset + info.max_chunk])
-    commit = next(ids)
-    _expect(ext, Op.COMMIT_PROFILE, commit)
-    stored, machine = _read_active(ext, info)
+    steps = [(Op.BEGIN_PROFILE, next(ids), BEGIN_REQUEST.pack(len(data), crc))]
+    steps += [(Op.PROFILE_CHUNK, next(ids), CHUNK_OFFSET.pack(offset) + data[offset:offset + info.max_chunk])
+              for offset in offsets]
+    steps.append((Op.COMMIT_PROFILE, next(ids), b""))
+    previous = ext.status()
+    upload_id = uuid4().hex[:UPLOAD_ID_LENGTH]
+    record({"kind": "intent", "op": UPLOAD_OP, "upload_id": upload_id, "profile_crc": crc,
+            "length": len(data), "profile_hex": data.hex(),
+            "steps": [{"op": op.name, "id": id} for op, id, _ in steps],
+            "previous": {"active": previous.active, "profile_crc": previous.profile_crc,
+                         "generation": previous.generation}})
+
+    def record_step(step: dict) -> None:
+        record({"kind": "step", "upload_id": upload_id, **step})
+
+    for op, id, payload in steps:
+        _expect(ext, op, id, payload, record=record_step)
+    commit = steps[-1][1]
+    stored, machine = read_active(ext, info)
     if (stored != data or machine.profile_crc != crc
             or (machine.last_id, machine.last_op, machine.last_status) != (commit, Op.COMMIT_PROFILE, Status.OK)):
         raise VerifyFailed(f"COMMIT_PROFILE id {commit} answered OK, but the machine does not hold "
@@ -308,12 +343,12 @@ def upload(ext: Extension, path: str) -> dict:
             "profile_crc": f"{crc:08X}"}
 
 
-def restore(ext: Extension, explicit_id: int | None = None) -> dict:
+def restore(ext: Extension, explicit_id: int | None = None, *, record: Record) -> dict:
     """Return to the stock game, then confirm with STATUS that it is active."""
     info = ext.info()
     _require(info, Op.RESTORE_STOCK)
     id = _id_for(ext, info, Op.RESTORE_STOCK, explicit_id)
-    _expect(ext, Op.RESTORE_STOCK, id)
+    _expect(ext, Op.RESTORE_STOCK, id, record=record)
     machine = ext.status()
     if (machine.active or machine.fault
             or (machine.last_id, machine.last_op, machine.last_status) != (id, Op.RESTORE_STOCK, Status.OK)):
@@ -321,7 +356,8 @@ def restore(ext: Extension, explicit_id: int | None = None) -> dict:
     return {"id": id, "status": Status.OK.name, "generation": machine.generation}
 
 
-def act(ext: Extension, op: Op, payload: bytes, explicit_id: int | None = None) -> dict:
+def act(ext: Extension, op: Op, payload: bytes, explicit_id: int | None = None, *,
+        record: Record) -> dict:
     """Send a game or diagnostic action. Its status is OK or ACCEPTED; ACCEPTED is not done."""
     if op not in ACTIONS:
         raise ValueError(f"{op.name} is not an action")
@@ -329,14 +365,14 @@ def act(ext: Extension, op: Op, payload: bytes, explicit_id: int | None = None) 
     _require(info, op)
     _check_action(op, payload, info)
     id = _id_for(ext, info, op, explicit_id)
-    result = ext.mutate(op, id, payload)
+    result = ext.mutate(op, id, payload, record=record)
     if result not in (Status.OK, Status.ACCEPTED):
         raise Refused(op, id, result)
     return {"id": id, "status": result.name}
 
 
-def _expect(ext: Extension, op: Op, id: int, payload: bytes = b"") -> None:
-    result = ext.mutate(op, id, payload)
+def _expect(ext: Extension, op: Op, id: int, payload: bytes = b"", *, record: Record) -> None:
+    result = ext.mutate(op, id, payload, record=record)
     if result != Status.OK:
         raise Refused(op, id, result)
 
@@ -386,7 +422,7 @@ def _id_for(ext: Extension, info: Info, op: Op, explicit_id: int | None) -> int:
     return explicit_id
 
 
-def _read_active(ext: Extension, info: Info) -> tuple[bytes | None, MachineStatus]:
+def read_active(ext: Extension, info: Info) -> tuple[bytes | None, MachineStatus]:
     """The active profile's bytes (None for stock) and the STATUS they were read under."""
     before = ext.status()
     if before.fault:

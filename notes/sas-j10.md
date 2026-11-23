@@ -290,6 +290,14 @@ delay settings rather than restoring their unknown starting values.
 A handler given as a bare address (`0x27A52` …) is the entry point the ROM's command
 table lists for that poll.
 
+**Setting the clock (since 2026-11-22).** Because `7F` never answers here, the host tools
+no longer repeat it: `tools/sas set-date-time` and the write test's clock step (its set
+and its restoration) share one clock set, `sas_machine.set_clock`, which sends `7F`
+exactly once without retrying, then reads `7E`. The CLI exits 0 when `7E` reads the time
+set (within 3 s; `7E` has whole seconds) and 1 otherwise. The write test's clock check
+now reads "7F sent once, 7E confirms" instead of "7F gets no reply". Earlier, the CLI
+sent `7F` up to three times and reported the missing reply as a failure.
+
 **Seeing play disabled.** `6A` does not show it here (it would only with `0x43E8E4`
 set). `6E` action 2 (authenticate) does: it answers `C5` while play is enabled before
 looking at the component, and with play disabled looks the component up; index `FF`
@@ -380,6 +388,58 @@ Never issue a new money movement while the previous outcome remains uncertain.
 completion on the last permitted poll, refusal, persistent pending status, mismatched
 transaction IDs, unexpected credits, lost money replies, and interrupted withdrawal.
 The captured live replies also exercise the command decoder and accounting checks.
+
+## Web control page (2026-11-22)
+
+`tools/web_control.py` serves a page that gives every phone or laptop on the home network
+the machine's controls over this same J10 link: AFT in-house deposits up to the machine's
+reported transfer limit, whole-balance cash-out (bit 1 of AFT status is clear, so partial
+withdrawals are not offered), live credits, meters and door, game and handpay events,
+remote spins and next-result picks through the firmware extension, the odds and payouts
+editor with stock restore, play enable, sound, bills and the clock. Setup and the service
+template are in `GETTING-STARTED.md`, **The web control page**; its invariants are in
+`.rules/web-control.md`.
+
+- **One owner.** One worker thread holds the serial line and paces every send at least
+  250 ms after the previous one (§2.3.3), with a general poll falling due every four
+  slots so events keep flowing during long operations. No other SAS host may use the port
+  while it runs.
+- **Journal.** Every state-changing command's intent (identity and exact request bytes)
+  is appended to an fsynced JSON-lines journal before the command is sent, and its
+  outcome after; the same file is the activity log shown on the page. A failed intent
+  write sends nothing. The file is created mode 0600 because AFT requests carry the
+  registration key.
+- **Recovery.** A command whose reply is lost is never resent. Its kind of action stays
+  blocked while the page reads what happened (money: the `FE` peek, credits and the
+  in-house meters, as under **Money test**; extension: STATUS and the CRC-bracketed
+  profile read-back; play: the `6E` probe) and reports it. Readings that disagree keep
+  that kind of action blocked; a restart reconciles every open intent from the journal
+  before admitting actions. Sound and bills have no read-back: after a lost reply they
+  show as unknown until a fresh, attributable ACK.
+- **Assumption (inferred).** The page reports a game's payout as the change in the total
+  coin out meter (`1C`) across the game, cross-checked with the active profile's nominal
+  award for the reel stops.
+
+**Live check (2026-11-23, owner-approved).** `tools/web_control_live_check.py` passed
+against the page running on the SAS host: state read online and fresh, one remote spin at
+the page's bet (3 credits, one game, credits down by the bet) and a 10-credit AFT in-house
+top-up (credits and in-house-in moved by exactly 10 credits). Evidence:
+[`web-control-live-check-2026-11-23.json`](evidence/web-control-live-check-2026-11-23.json).
+What the real machine showed that the fakes did not:
+
+- **Transfers pause after a game.** Right after a game ends, the machine briefly stops
+  offering transfers to the machine (AFT lock-and-status available-transfers), and a few
+  minutes later it offers them again. The first run's top-up was refused by the page's
+  admission with nothing sent, so the check now waits, reading only, until the page
+  admits the top-up. The length of the pause was not measured.
+- **A full refresh takes about 4 s**, and during it only long polls answer. The page
+  now goes offline only after one unbroken run of about 2 s with no validated reply of
+  any kind (general poll, long-poll reply or ACK), not on a single missed general poll.
+- **Only the line's own errors count as a lost line.** Any other `OSError` (a missing
+  ROM file) ends the page with its traceback instead of reopening the port forever.
+
+The coin-out-as-payout assumption above is consistent with both games (each paid 0 and
+coin out did not move), but no winning game was played, so it stays an assumption.
 
 ## ROM signature (long poll 21)
 

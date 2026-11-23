@@ -1,0 +1,35 @@
+# systemd unit template for the web control page (tools/web_control.py).
+#
+# Replace every <placeholder> before installing; GETTING-STARTED.md, "Running the web control
+# page as a service", walks through it:
+#   <user>                  the account the page runs as; it needs the serial group below
+#   <python3>               absolute path of a Python 3.9+ interpreter that has pyserial
+#   <checkout>              absolute path of a checkout of this repository (tools/ and roms/)
+#   <serial-device>         the adapter's stable /dev/serial/by-id/... path
+#   <listen-address:port>   the address and TCP port to serve on, e.g. a LAN address
+#   <journal-file>          the activity log and command journal; its directory must exist
+#                           and belong to <user>
+#
+# The page answers only requests whose Host names the --listen address or an --allow-host
+# name. Add "--allow-host <name>" to ExecStart for every host name or address people type to
+# reach the page that differs from the --listen address.
+#
+# The page must have the serial port to itself: stop any other program holding it first.
+
+[Unit]
+Description=Blazing 7s web control page
+# Binding a specific address needs the network up first.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=<user>
+SupplementaryGroups=dialout
+ExecStart=<python3> <checkout>/tools/web_control.py --port <serial-device> --listen <listen-address:port> --journal <journal-file>
+# web_control exits non-zero when its machine worker or HTTP server dies.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

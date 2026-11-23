@@ -85,5 +85,13 @@ COPY --from=toolchain /home/linuxbrew/.linuxbrew/lib /home/linuxbrew/.linuxbrew/
 RUN --mount=type=bind,source=firmware/requirements.txt,target=/tmp/requirements.txt \
     python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --only-binary :all: --require-hashes -r /tmp/requirements.txt
+# Chromium for tools/test_web_browser.py: the build the hash-locked playwright pins, with the
+# system libraries it needs (installed through apt, so as root), at a fixed path every user reads.
+# Playwright's bundled node links libatomic, which the slim base lacks, so it comes first.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 \
+    && /opt/venv/bin/playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 ENV PATH=/opt/venv/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER ubuntu

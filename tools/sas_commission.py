@@ -618,7 +618,7 @@ def capture(session: Session, endpoint: str) -> Archive:
     if has_record_trace(data[LAYOUT.persist_size:]):
         raise Mismatch(Mismatch.RECORD, "a commissioning record was started; resume with its original archive")
     # datetime.UTC needs Python 3.11; the stdlib suite runs on the system python3, 3.9 on macOS.
-    when = datetime.now(timezone.utc).isoformat(timespec="seconds")  # noqa: UP017
+    when = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return Archive(data, identity, Provenance(endpoint, socket.gethostname(), CAPTURE_METHOD, when))
 
 

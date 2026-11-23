@@ -47,6 +47,18 @@ class WriteTestTest(unittest.TestCase):
         self.assertTrue(any(not r["ok"] for r in records if "check" in r))
         self.assertEqual(machine.shutdown_flag, 2)
 
+    def test_the_clock_step_sends_one_7f_per_set_and_reads_each_back_with_7e(self):
+        for writable in (True, False):
+            with self.subTest(writable=writable):
+                machine = FakeS6000()
+                machine.clock_writable = writable
+                ok, _ = run(machine)
+                self.assertEqual(ok, writable)
+                commands = sent_commands(machine)
+                sets = [i for i, name in enumerate(commands) if name == "set-date-time"]
+                self.assertEqual(len(sets), 2)  # the test time, then the restoration
+                self.assertTrue(all(commands[i + 1] == "date-time" for i in sets))
+
     def test_shutdown_is_not_sent_unless_the_probe_shows_disabled_play(self):
         machine = FakeS6000(shows_disable=False)
         ok, _ = run(machine)

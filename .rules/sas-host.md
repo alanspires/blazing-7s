@@ -10,11 +10,13 @@ paths:
   - "tools/sas_testing.py"
   - "tools/sas_write_test.py"
   - "tools/sas_money_test.py"
+  - "tools/sas_machine.py"
   - "tools/test_sas_protocol.py"
   - "tools/test_sas_commands.py"
   - "tools/test_sas_cli.py"
   - "tools/test_sas_write_test.py"
   - "tools/test_sas_money_test.py"
+  - "tools/test_sas_machine.py"
   - "tools/fixtures/s6000_dump.jsonl"
   - "tools/fixtures/s6000_rom_signatures.json"
   - "tools/fixtures/s6000_money_*"
@@ -28,11 +30,17 @@ paths:
 ## Ownership and transport boundary
 
 - This slice owns stock J10 SAS transport, command codecs and captured-reply verification.
-  Live write/money flows belong to `sas-host-machine-tests.md`; private extension/profile
+  `sas_machine` is the one home of the machine operations the CLI, the write and money
+  tests and the web control page share (send-once writes, `record` before send, `pace`
+  between host calls, reconcilers); never copy one into a caller.
+  Live write/money flows belong to `sas-host-machine-tests.md`; the web control page to
+  `web-control.md`; private extension/profile
   semantics to `firmware-remote-control.md`; pre-boot commissioning to
   `firmware-commissioning.md`; J3 to `j3-hhu.md`.
 - `tools/sas` (SSH wrapper) and `tools/sas.py` (CLI and `SerialLine`) also dispatch
   extension and commissioning commands; those semantics stay with their firmware rules.
+  `SerialLine.read_message` raises `SerialClosed` (an `OSError`) when the descriptor reports
+  EOF after `select` said it was readable: a hung-up adapter, never silence to retry.
   The wrapper has no host defaults: online commands require `SAS_HOST` and `SAS_PORT`
   and exit before any SSH/rsync call without them (`SAS_DIR` defaults to `blazing-7s`);
   `list`, `help`, `profile-stock` and `profile-preview` stay local. `sas.py` and

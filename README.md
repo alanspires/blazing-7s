@@ -44,6 +44,14 @@ Mikohn, JCM and the others named in `vendor-docs/README.md`), included for refer
 covered by this repository's license; the Ghidra database contains disassembly of
 vendor code. The author's own code and notes are MIT-licensed: see [LICENSE](LICENSE).
 
+The web control page also ships third-party fonts and icons under their own licences,
+not the MIT `LICENSE`: Lato, the author's LatoLatin 2.015 web-kit WOFF2 files, under the
+SIL Open Font License 1.1; URW Gothic Demi from the (URW)++ base 35 fonts release
+20200910, as a subset, under AGPL-3.0 with its PostScript/PDF font exception; and Lucide
+1.52.0 icons under ISC (plus MIT for the icons derived from Feather). Sources, versions,
+hashes and licence texts are in `tools/web/static/fonts/README.md` and
+`tools/web/static/icons/README.md`.
+
 To run the tests, build the firmware or connect to your own machine, see
 [GETTING-STARTED.md](GETTING-STARTED.md).
 
@@ -80,7 +88,8 @@ To run the tests, build the firmware or connect to your own machine, see
   observed on the machine.
 - `notes/sas-j10.md` the SAS port on backplane J10: wiring, voltage and cable checks,
   SAS host setup, commands, what the machine reported, host timing it needs, the ROM
-  signature check, and which SAS long polls the firmware accepts.
+  signature check, which SAS long polls the firmware accepts, and the web control page's
+  live check (evidence in `notes/evidence/web-control-live-check-2026-11-23.json`).
 - `notes/j3-hhu-protocol.md` what is known about the J3 (HHU) serial link.
 - `notes/reel-control.md` internal reel-motion and normal-outcome hooks and
   stop/symbol mapping. No stock serial reel-target command has been established.
@@ -126,6 +135,25 @@ To run the tests, build the firmware or connect to your own machine, see
   `tools/sas_client.py` one decoded long poll, `tools/sas_write_test.py` the non-money
   write test, `tools/sas_money_test.py` the full-balance money test, `tools/sas_tables.py`
   the spec's meter, exception and denomination codes, `tools/sas_testing.py` test fakes.
+- `tools/sas_machine.py` the machine operations shared by the web control page,
+  `tools/sas.py` and the write and money tests: state reads, AFT deposit and whole-balance
+  cash-out, play, sound, bills and clock, the extension's spin and next-result payloads,
+  and the reconcilers that read what a command with a lost reply actually did. Each
+  state-changing command is recorded before it is sent, and sent once.
+- `tools/web_control.py` the web control page: a server on the SAS host that owns the
+  serial line and gives every phone or laptop on the network the machine's controls,
+  with live updates and a lasting activity log (`GETTING-STARTED.md`, **The web control
+  page**; `.rules/web-control.md`). `tools/web_state.py` holds the machine snapshot, the
+  one admission function and the next-result catalogue, `tools/web_worker.py` the one
+  thread that talks to the machine, `tools/web_journal.py` the fsynced journal of intents,
+  outcomes and activity, `tools/web_app.py` the HTTP routes and live event stream,
+  `tools/web_views.py` the server-rendered pages, and `tools/web/` the stylesheet, fonts,
+  icons and `live.js`.
+- `tools/web_control.service` a systemd unit template (placeholders only) for running the
+  page at boot.
+- `tools/web_control_live_check.py` the scripted check of a running page against the real
+  machine: reads state, plays one remote spin, adds a small top-up, and prints a redacted
+  record. It moves money; run it only with the owner's approval.
 - `tools/sas_profile.py` is the offline profile codec and nominal-math preview;
   `tools/sas_extension.py` implements capability discovery, exact-ID requests,
   verified profile transfer, selected outcomes, remote spins and diagnostic requests.
@@ -172,6 +200,9 @@ To run the tests, build the firmware or connect to your own machine, see
 
 - `GETTING-STARTED.md` setup: the dev container or a native install, the test and
   build commands, connecting to a machine, and the privacy check for contributors.
+- `design/` the web control page's design system: `DESIGN.md` (look, colour, type and
+  spacing rules), with its tokens as `tokens.css` and `tokens.json`;
+  `tools/web/static/tokens.css` is a copy of `tokens.css`.
 - `.devcontainer/` a dev container with the pinned m68k toolchain and Python
   environment, for the tests and the firmware build.
 - `.githooks/pre-push` runs the privacy check on every push, once enabled

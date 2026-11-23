@@ -27,10 +27,15 @@ docker build -f .devcontainer/Dockerfile -t blazing-7s-dev .
 docker run --rm -v "$PWD":/work -w /work/tools blazing-7s-dev python3 -m unittest \
   test_sas_protocol test_sas_commands test_sas_cli test_sas_write_test \
   test_sas_money_test test_bsg_frame test_sas_profile test_sas_extension \
-  test_sas_commission test_privacy_check
+  test_sas_commission test_privacy_check test_sas_machine test_web_journal \
+  test_web_state test_web_worker test_web_views test_web_app \
+  test_web_control_live_check
 
 # the full suite, including the compiled-firmware CPU tests (several minutes)
 docker run --rm -v "$PWD":/work -w /work blazing-7s-dev python -m pytest firmware/tests tools
+
+# only the web control page in Chromium (the image ships the pinned Chromium)
+docker run --rm -v "$PWD":/work -w /work blazing-7s-dev python -m pytest tools/test_web_browser.py
 
 # the firmware build, into firmware/build/
 docker run --rm -v "$PWD":/work -w /work blazing-7s-dev python firmware/build.py firmware/patches.json
@@ -49,6 +54,7 @@ create the hash-locked Python environment (details in `firmware/toolchain.md`):
 brew install m68k-elf-gcc m68k-elf-binutils uv
 uv venv --python 3.12 firmware/.venv
 uv pip install --python firmware/.venv/bin/python --require-hashes -r firmware/requirements.txt
+firmware/.venv/bin/playwright install chromium   # for tools/test_web_browser.py
 ```
 
 Then, from the repository root:
@@ -58,10 +64,15 @@ Then, from the repository root:
 (cd tools && python3 -m unittest \
   test_sas_protocol test_sas_commands test_sas_cli test_sas_write_test \
   test_sas_money_test test_bsg_frame test_sas_profile test_sas_extension \
-  test_sas_commission test_privacy_check)
+  test_sas_commission test_privacy_check test_sas_machine test_web_journal \
+  test_web_state test_web_worker test_web_views test_web_app \
+  test_web_control_live_check)
 
 # the full suite, including the compiled-firmware CPU tests (several minutes)
 firmware/.venv/bin/python -m pytest firmware/tests tools
+
+# only the web control page in Chromium
+firmware/.venv/bin/python -m pytest tools/test_web_browser.py
 
 # the firmware build, into firmware/build/
 firmware/.venv/bin/python firmware/build.py firmware/patches.json
@@ -75,13 +86,20 @@ The host-tool tests (`tools/test_*.py` in the unittest list above) need only the
 Python standard library. The SAS command table and the J3 CRC are checked against the
 ROM; each SAS command runs through the CLI against a scripted machine. Real replies in
 `tools/fixtures/` must decode consistently; captured profile-switch replies also
-exercise the per-operation receive budget without wall-clock waits.
+exercise the per-operation receive budget without wall-clock waits. The web control
+page's suites (`test_web_*` and `test_sas_machine`) run its machine operations, journal,
+worker, views and HTTP server against the scripted machine, including a reply lost at
+each money, spin, outcome and profile step, and the live-check script end to end against
+the real server on that machine.
 
 The full pytest suite adds the firmware tests in `firmware/tests/`, which run the
 compiled extension and the original ROM routines around it in a CPU emulator, and the
 tools tests that need the firmware environment: the commissioning wrapper and the
 compiled-firmware integration tests (`tools/test_sas_commission_wrapper.py`,
-`tools/test_sas_commission_firmware.py`, `tools/test_sas_firmware.py`).
+`tools/test_sas_commission_firmware.py`, `tools/test_sas_firmware.py`), and the browser
+suite `tools/test_web_browser.py`, which drives the real web control page in Chromium
+through pytest-playwright (live updates across two pages, one-tap actions, lost-reply and
+offline disablement, the phone layout).
 
 ## Check the build
 
@@ -122,6 +140,84 @@ without confirmation. Read `notes/sas-j10.md`, **Money test**, before running
 and every movement stays in the lifetime meters. The payout and outcome features are
 for a privately owned machine used for entertainment, not for regulated or commercial
 gaming machines.
+
+## The web control page
+
+`tools/web_control.py` serves a page that controls the machine from any phone or laptop
+on your network: credits in and whole-balance cash out, live state and meters, remote
+spins, picking the next result, the odds and payouts editor, restoring the stock game,
+and machine settings. It runs on the SAS host, owns the serial line while it runs, and
+keeps an activity log and command journal across restarts. It needs the modified firmware
+(`firmware/README.md`): it reads the extension's INFO and STATUS with every state read.
+Anyone who can reach the page can use every control, with no login or confirmation, so
+serve it only on a network you trust.
+
+On the SAS host, from a checkout (the page reads `tools/` and `roms/`), with pyserial
+installed for the interpreter:
+
+```sh
+python3 tools/web_control.py --port /dev/serial/by-id/<adapter> \
+  --listen <address>:<port> --journal <journal-file>
+```
+
+Every argument is required; there are no defaults. `--listen` takes the address to bind
+(`[address]:port` for IPv6). The page answers only requests whose host is the `--listen`
+address or a name given with `--allow-host` (repeatable), so when people open it by a
+host name, or by an address other than the one it binds (such as `0.0.0.0`), list that
+name or address with `--allow-host`. `--address` sets the machine's SAS address
+(default 1). The journal's directory must exist; the file is created with mode 0600,
+because its command records hold the machine's AFT registration key.
+
+The page must have the serial port to itself: stop any other program holding the port
+before starting it, and do not run `tools/sas` against the machine while it runs. When a
+command's reply is lost, the page never resends it: it reads the machine, says what
+happened, and keeps that kind of action blocked until it knows (`.rules/web-control.md`).
+
+### Running the web control page as a service
+
+`tools/web_control.service` is a systemd unit template with placeholders only. To install
+it on a Linux SAS host:
+
+1. **Serial device.** Use the adapter's stable path under `/dev/serial/by-id/`, which
+   survives reboots and replugging, rather than a `/dev/ttyUSBn` name. Find it with
+   `ls -l /dev/serial/by-id/`.
+2. **Permissions.** The service user needs the serial group: on most distributions that
+   is `dialout` (`sudo usermod -aG dialout <user>`; the unit also adds it through
+   `SupplementaryGroups`). Check the device's group with `ls -l` on its by-id path.
+3. **Journal directory.** Create the directory that holds `<journal-file>` and give it to
+   the service user: `sudo install -d -o <user> -m 0700 <journal-directory>`.
+4. **Interpreter.** Pick a Python 3.9 or newer that has pyserial (a distribution's
+   `python3-serial` package, or a venv with `pip install pyserial`), and use its absolute
+   path for `<python3>`.
+5. **Address.** Bind the host's LAN address, for example `--listen <lan-address>:<port>`,
+   so phones on the network can reach it; the unit waits for `network-online.target`
+   before binding. Add `--allow-host <name>` to `ExecStart` for each host name people
+   type to open the page, since the host check accepts only the `--listen` address and
+   the `--allow-host` names.
+6. **Free the port.** Stop and disable any other program that holds the serial port,
+   such as a console logger or another SAS host program.
+7. **Install and enable.** Copy the template, replace every `<placeholder>`, and start it:
+
+   ```sh
+   sudo cp tools/web_control.service /etc/systemd/system/web_control.service
+   sudoedit /etc/systemd/system/web_control.service    # replace every <placeholder>
+   sudo systemd-analyze verify /etc/systemd/system/web_control.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now web_control.service
+   ```
+
+8. **Verify.** `systemctl status web_control.service` shows it running,
+   `journalctl -u web_control.service` shows its errors, and
+   `curl http://<listen-address:port>/state.json` from another computer shows the
+   machine's link and credits. It starts at boot and restarts when it fails.
+9. **Stop.** `sudo systemctl stop web_control.service` frees the serial port (for
+   `tools/sas`, for example); `sudo systemctl disable --now web_control.service` also
+   keeps it from starting at boot.
+
+`tools/web_control_live_check.py --url <page-url> --credits <n>` is the scripted check
+against a running page on the real machine: it reads the state, plays one remote spin and
+adds `<n>` credits, and prints one redacted JSON record. It moves money and plays a game,
+which stay in the lifetime meters.
 
 ## Opening the Ghidra project
 

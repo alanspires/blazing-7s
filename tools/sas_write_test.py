@@ -9,23 +9,17 @@ from __future__ import annotations
 
 import datetime as dt
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import sas_commands as sc
+import sas_machine as sm
 import sas_protocol as sas
 from sas_client import poll
 from sas_tables import IDLE_EXCEPTIONS
 
-POLL_INTERVAL = 0.25  # §2.3.3
-HANDLER_POLLS = 8  # reads, 2 s, for a handler's effect to show
 MAIN_LOOP_POLLS = 120  # reads, 30 s, for the main loop to act on shutdown or startup
 DRAIN_POLLS = 40  # general polls for the machine to run out of exceptions to report
 
-# 6E action 2 (authenticate) answers C5 while play is enabled, before it looks at the
-# component; with play disabled it looks the component up, and index FF does not exist
-# (FUN_0002f28e takes 1-3), so the answer is 80 and nothing starts (FUN_0002f598).
-CANNOT_AUTHENTICATE_NOW, NO_SUCH_COMPONENT = 0xC5, 0x80
-PROBE_COMPONENT = "0xFF"
 LOCKED, NOT_LOCKED = 0x00, 0xFF  # 74 lock status
 REGISTRATION_READY, REGISTERED, NOT_REGISTERED = 0x00, 0x01, 0x80  # 73 status
 AFT_REGISTERED_BIT = 0x08  # 74 AFT status while registered (FUN_0003070a)
@@ -37,8 +31,6 @@ TEST_DELAY = 10  # 2E, in units of 100 ms
 TEST_KEY = bytes(range(1, 21)).hex()
 TEST_POS_ID = 1
 LOCK_TIMEOUT = 1000  # hundredths of a second: an AFT lock left behind lapses after 10 s
-CLOCK_FORMAT = "%m%d%Y%H%M%S"
-CLOCK_TOLERANCE = dt.timedelta(seconds=3)  # 7E has whole seconds; 7F is sent up to 3 times
 
 
 class StepFailed(Exception):
@@ -60,19 +52,25 @@ class WriteTest:
         self.report = report
         self.failures = 0
 
+    def pace(self) -> None:
+        self.line.wait(sas.POLL_INTERVAL)
+
     def send(self, name: str, *values, retry: bool = True) -> dict:
-        self.line.wait(POLL_INTERVAL)
+        self.pace()
         result = poll(self.host, sc.BY_NAME[name], [str(v) for v in values], retry=retry)
         self.report(result)
         return result
 
+    def machine(self, read: Callable, *values, **options):
+        """A sas_machine read, paced and logged like every other poll; its failure is StepFailed."""
+        self.pace()
+        try:
+            return read(self.host, *values, observe=self.report, **options)
+        except sm.MachineError as e:
+            raise StepFailed(str(e)) from e
+
     def read(self, name: str, *values, retry: bool = True) -> dict:
-        result = self.send(name, *values, retry=retry)
-        if "error" in result:
-            raise StepFailed(f"{name}: {result['error']}")
-        if not isinstance(result["reply"], dict):
-            raise StepFailed(f"{name}: expected data, not a bare ACK")
-        return result["reply"]
+        return self.machine(sm.read, name, *values, retry=retry)
 
     def check(self, label: str, ok: bool, detail: object = "") -> bool:
         self.report({"check": label, "ok": bool(ok), "detail": str(detail)})
@@ -93,7 +91,7 @@ class WriteTest:
         seen = [(e.exception, True) for e in self.host.events]
         self.host.events.clear()
         for _ in range(DRAIN_POLLS):
-            self.line.wait(POLL_INTERVAL)
+            self.pace()
             reply = self.host.general_poll()
             if isinstance(reply, sas.RomSignature):
                 continue
@@ -121,11 +119,7 @@ class WriteTest:
         return self.play_disabled(), self.aft_status(), self.registration()
 
     def play_disabled(self) -> bool:
-        """The play-disabled bit (bit 7 of 0x412D38), read with the 6E probe."""
-        status = self.read("authentication", 2, 0, PROBE_COMPONENT)["status"]
-        if status not in (CANNOT_AUTHENTICATE_NOW, NO_SUCH_COMPONENT):
-            raise StepFailed(f"6E probe answered {status:02X}")
-        return status == NO_SUCH_COMPONENT
+        return self.machine(sm.play_disabled)
 
     def aft_status(self) -> dict:
         return self.read("aft-lock", 0xFF, 0, 0)
@@ -134,12 +128,14 @@ class WriteTest:
         return self.read("aft-register", 0xFF)
 
     def machine_time(self) -> dt.datetime:
-        reply = self.read("date-time")
-        return dt.datetime.strptime(reply["date"] + reply["time"], CLOCK_FORMAT)
+        return self.machine(sm.machine_time)
 
-    def set_machine_time(self, when: dt.datetime) -> dict:
-        stamp = when.strftime(CLOCK_FORMAT)
-        return self.send("set-date-time", stamp[:8], stamp[8:])
+    def set_machine_time(self, when: dt.datetime) -> sm.ClockResult:
+        """The shared clock set: one 7F, then 7E reads it back."""
+        try:
+            return sm.set_clock(self.host, when, record=lambda intent: None, pace=self.pace, observe=self.report)
+        except sm.MachineError as e:
+            raise StepFailed(str(e)) from e
 
 
 def enable_game(t: WriteTest) -> bool:
@@ -147,11 +143,11 @@ def enable_game(t: WriteTest) -> bool:
     the 6E probe shows it decides the shutdown step."""
     try:
         t.check("09 disable game 1: ACK", acked(t.send("enable-game", 1, 0)))
-        shown = t.wait_for(t.play_disabled, True, HANDLER_POLLS)
+        shown = t.wait_for(t.play_disabled, True, sm.HANDLER_POLLS)
         t.check("6E probe shows play disabled", shown)
     finally:
         t.restore("game 1 enabled", lambda: acked(t.send("enable-game", 1, 1))
-                  and t.wait_for(t.play_disabled, False, HANDLER_POLLS) is False)
+                  and t.wait_for(t.play_disabled, False, sm.HANDLER_POLLS) is False)
     return shown
 
 
@@ -174,9 +170,9 @@ def start_up(t: WriteTest) -> bool:
     """Send startup until the probe shows play enabled. The machine has left the poll after a
     startup unanswered (its main loop waits on 0x74E1A's word while re-enabling play), so a
     silent probe here means wait, not fail."""
-    for _ in range(MAIN_LOOP_POLLS // HANDLER_POLLS):
+    for _ in range(MAIN_LOOP_POLLS // sm.HANDLER_POLLS):
         t.send("startup")
-        for _ in range(HANDLER_POLLS):
+        for _ in range(sm.HANDLER_POLLS):
             try:
                 if not t.play_disabled():
                     return True
@@ -197,20 +193,16 @@ def sound(t: WriteTest) -> None:
 
 def clock(t: WriteTest) -> None:
     """7F writes the clock chip and sends no reply at all (FUN_0002eaac never ACKs, unlike
-    Table 7.17); 7E reads it back. The test time is an hour off the machine's, and the
-    restore adds the time that passed."""
+    Table 7.17), so it goes once and 7E reads it back. The test time is an hour off the
+    machine's, and the restore adds the time that passed."""
     start, started = t.machine_time(), time.monotonic()
     test = start - dt.timedelta(hours=1) if start.hour else start + dt.timedelta(hours=1)
     try:
-        t.check("7F gets no reply", silent(t.set_machine_time(test)))
-        got = t.machine_time()
-        t.check("7E reads the test time", abs(got - test) <= CLOCK_TOLERANCE, got)
+        result = t.set_machine_time(test)
+        t.check("7F sent once, 7E confirms", result.confirmed, result.read)
     finally:
-        def put_back() -> bool:
-            t.set_machine_time(start + dt.timedelta(seconds=time.monotonic() - started))
-            expected = start + dt.timedelta(seconds=time.monotonic() - started)
-            return abs(t.machine_time() - expected) <= CLOCK_TOLERANCE
-        t.restore("clock", put_back)
+        t.restore("clock", lambda: t.set_machine_time(
+            start + dt.timedelta(seconds=time.monotonic() - started)).confirmed)
 
 
 def aft_lock(t: WriteTest) -> None:

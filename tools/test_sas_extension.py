@@ -16,144 +16,55 @@ from unittest import mock
 import sas_extension as se
 import sas_profile as sp
 import sas_protocol as protocol
-from sas_testing import FIXTURES, REPO, FakeLine, TempDirTest, read_jsonl, run_cli
+from sas_testing import (
+    ACCEPTED,
+    ALL_CAPS,
+    ARM,
+    BEGIN,
+    BUSY,
+    CANCEL,
+    CHUNK,
+    COMMIT,
+    FIXTURES,
+    INFO,
+    JOG,
+    LIMITS,
+    MAGIC,
+    POSITION,
+    PROFILE_CAP,
+    READ,
+    REPO,
+    RESTORE,
+    SPIN,
+    SPIN_CAP,
+    STATUS,
+    WIRE_VERSION,
+    FakeExtension,
+    FakeLine,
+    FakeS6000,
+    TempDirTest,
+    read_jsonl,
+    run_cli,
+)
+from sas_testing import EXTENSION_POLL as POLL
 
 ADDRESS = 1
-# firmware/INTEGRATION.md, "Wire protocol v1": restated here so the fake checks the wire
-# against the contract rather than against sas_extension's own encoding.
-POLL = 0xE0
-MAGIC = b"S6RE"
-WIRE_VERSION = 1
-INFO, STATUS, READ = 0, 1, 2
-BEGIN, CHUNK, COMMIT, RESTORE = 16, 17, 18, 19
-ARM, CANCEL, SPIN, POSITION, JOG = 32, 33, 34, 35, 36
-QUERIES = (INFO, STATUS, READ)
-OK, ACCEPTED, BAD_ID, BUSY, INVALID_PROFILE, INCOMPLETE = 0, 1, 4, 5, 7, 8
-MAX_PAYLOAD = 64
-PROFILE_CAP, OUTCOME_CAP, SPIN_CAP, POSITION_CAP, JOG_CAP = 0x01, 0x02, 0x04, 0x08, 0x10
-ALL_CAPS = PROFILE_CAP | OUTCOME_CAP | SPIN_CAP | POSITION_CAP | JOG_CAP
-# firmware/src/fw.h: the first firmware's INFO limits.
-LIMITS = {"max_chunk": 62, "max_lines": 5, "max_bet_per_line": 3, "max_total_bet": 15,
-          "stops": sp.STOPS, "max_award": 1500}
+REQUEST_OP_AT = 3 + len(MAGIC) + 1  # address, command, length, magic, version, then the op
 
 
-class FakeExtension(FakeLine):
-    """A machine whose extension answers its long poll per the wire contract, keeping the
-    state the CLI reads back. A lost reply (`silent` ops) still lets the machine act, as a
-    reply lost on the line would; `tamper` rewrites reply data after the command byte.
-    `failure` (op, exception, stage) lets the machine act on that op, then raises the
-    exception from the host's write ("send") or from its wait for the reply ("read")."""
+def fake(capabilities: int = ALL_CAPS, **options: int) -> FakeS6000:
+    """A machine whose extension answers every action with ACCEPTED and changes nothing else,
+    so these tests see the wire, not the game model."""
+    return FakeS6000(extension=FakeExtension(capabilities, action_status=ACCEPTED, **options))
 
-    def __init__(self, capabilities: int = ALL_CAPS, last_id: int = 41, **limits: int):
-        super().__init__()
-        self.capabilities = capabilities
-        self.limits = LIMITS | limits
-        self.last = (last_id, ARM, b"")  # id, op and payload of the latest mutation
-        self.last_status = OK
-        self.fault = False
-        self.active: bytes | None = None
-        self.generation = 3
-        self.profile_crc = 0
-        self.staged: tuple[int, bytearray, set[int]] | None = None
-        self.action_status = ACCEPTED
-        self.corrupt_commit = False
-        self.silent: set[int] = set()
-        self.tamper = None
-        self.failure: tuple[int, BaseException, str] | None = None
-        self._read_failure: BaseException | None = None
-        self.requests: list[tuple[int, int, bytes]] = []
-        self.executed: list[int] = []
 
-    @property
-    def next_id(self) -> int:
-        return self.last[0] + 1
-
-    def mutations(self) -> list[tuple[int, int, bytes]]:
-        return [r for r in self.requests if r[0] not in QUERIES]
+class InterruptAfterCommit(FakeS6000):
+    """Interrupts the wait for the first STATUS reply after COMMIT: the read-back."""
 
     def send(self, first, rest):
         super().send(first, rest)
-        if first == protocol.SYNC_POLL:
-            return
-        message = protocol.check_crc(bytes((first,)) + rest)
-        assert message[:2] == bytes((ADDRESS, POLL)), message.hex(" ")
-        length, body = message[2], message[3:]
-        assert length == len(body) and body[:4] == MAGIC and body[4] == WIRE_VERSION, message.hex(" ")
-        op, id, payload = body[5], int.from_bytes(body[6:14], "little"), body[14:]
-        assert len(payload) <= MAX_PAYLOAD, message.hex(" ")
-        self.requests.append((op, id, payload))
-        status, data = self.answer(op, id, payload)
-        reply = MAGIC + bytes((WIRE_VERSION, op, status)) + id.to_bytes(8, "little") + data
-        framed = bytes((len(reply),)) + reply
-        if self.tamper:
-            framed = self.tamper(framed)
-        if self.failure is not None and self.failure[0] == op:
-            _, exception, stage = self.failure
-            self.failure = None
-            if stage == "send":
-                raise exception
-            self._read_failure = exception
-        elif op not in self.silent:
-            self.replies.append(protocol.with_crc(bytes((ADDRESS, POLL)) + framed))
-
-    def read_message(self, timeout):
-        if self._read_failure is not None:
-            exception, self._read_failure = self._read_failure, None
-            raise exception
-        return super().read_message(timeout)
-
-    def answer(self, op: int, id: int, payload: bytes) -> tuple[int, bytes]:
-        limits = self.limits
-        if op == INFO:
-            return OK, struct.pack("<IQHBBBBBI", self.capabilities, 0 if self.fault else self.next_id,
-                                   sp.PROFILE_SIZE, limits["max_chunk"], limits["max_lines"],
-                                   limits["max_bet_per_line"], limits["max_total_bet"], limits["stops"],
-                                   limits["max_award"])
-        if op == STATUS:
-            return OK, struct.pack("<QBBBIIB", self.last[0], self.last[1], self.last_status,
-                                   self.active is not None, self.generation, self.profile_crc, self.fault)
-        if op == READ:
-            offset, count = struct.unpack("<HB", payload)
-            assert count <= MAX_PAYLOAD and offset + count <= sp.PROFILE_SIZE, (offset, count)
-            return (INCOMPLETE, b"") if self.active is None else (OK, self.active[offset:offset + count])
-        if id == self.last[0] and (op, payload) == self.last[1:]:
-            return self.last_status, b""  # the recorded answer; nothing happens again
-        if id <= self.last[0]:
-            return BAD_ID, b""
-        self.last = (id, op, payload)
-        self.executed.append(op)
-        self.last_status = self.execute(op, payload)
-        return self.last_status, b""
-
-    def execute(self, op: int, payload: bytes) -> int:
-        if op == BEGIN:
-            size, crc = struct.unpack("<HI", payload)
-            assert size == sp.PROFILE_SIZE, size
-            self.staged = (crc, bytearray(size), set())
-            return OK
-        if op == CHUNK:
-            offset, data = int.from_bytes(payload[:2], "little"), payload[2:]
-            assert len(data) <= self.limits["max_chunk"], len(data)
-            _, buffer, covered = self.staged
-            buffer[offset:offset + len(data)] = data
-            covered.update(range(offset, offset + len(data)))
-            return OK
-        if op == COMMIT:
-            crc, buffer, covered = self.staged
-            if len(covered) != len(buffer):
-                return INCOMPLETE
-            if zlib.crc32(buffer) != crc:
-                return INVALID_PROFILE
-            if self.corrupt_commit:
-                buffer[-1] ^= 1
-            self.active, self.profile_crc, self.staged = bytes(buffer), crc, None
-            self.generation += 1
-            return OK
-        if op == RESTORE:
-            self.active, self.profile_crc = None, 0
-            self.generation += 1
-            return OK
-        return self.action_status
+        if self.extension.requests and self.extension.requests[-1][0] == COMMIT:
+            self.failure = (STATUS, KeyboardInterrupt(), "read")
 
 
 def run_json(argv: list[str], line: FakeLine) -> tuple[int, dict]:
@@ -178,7 +89,7 @@ class ProfileFileTest(TempDirTest):
 
 class QueryTest(unittest.TestCase):
     def test_info_request_is_the_framed_query_and_reports_the_limits(self):
-        machine = FakeExtension()
+        machine = fake()
         code, result = run_json(["extension-info"], machine)
         self.assertEqual(code, 0)
         request = MAGIC + bytes((WIRE_VERSION, INFO)) + bytes(8)
@@ -186,17 +97,19 @@ class QueryTest(unittest.TestCase):
                          protocol.with_crc(bytes((ADDRESS, POLL, len(request))) + request))
         reply = result["reply"]
         self.assertEqual({name: reply[name] for name in LIMITS}, LIMITS)
-        self.assertEqual((reply["next_id"], int(reply["capabilities"], 16)), (machine.next_id, ALL_CAPS))
+        self.assertEqual((reply["next_id"], int(reply["capabilities"], 16)),
+                         (machine.extension.next_id, ALL_CAPS))
 
     def test_status_reports_a_pending_request_and_the_active_profile(self):
-        machine = FakeExtension()
-        machine.last_status, machine.active, machine.profile_crc = ACCEPTED, bytes(sp.PROFILE_SIZE), 0x1234ABCD
+        machine = fake()
+        ext = machine.extension
+        ext.last_status, ext.active, ext.profile_crc = ACCEPTED, bytes(sp.PROFILE_SIZE), 0x1234ABCD
         code, result = run_json(["extension-status"], machine)
         self.assertEqual(code, 0)
         reply = result["reply"]
         self.assertEqual((reply["last_id"], reply["pending"], reply["active"], reply["generation"],
                           int(reply["profile_crc"], 16), reply["fault"]),
-                         (machine.last[0], True, "profile", machine.generation, machine.profile_crc, False))
+                         (ext.last[0], True, "profile", ext.generation, ext.profile_crc, False))
 
     def test_replies_that_do_not_answer_the_request_are_rejected(self):
         tampers = {
@@ -211,8 +124,8 @@ class QueryTest(unittest.TestCase):
         }
         for name, tamper in tampers.items():
             with self.subTest(name):
-                machine = FakeExtension()
-                machine.tamper = tamper
+                machine = fake()
+                machine.extension.tamper = tamper
                 code, result = run_json(["extension-info"], machine)
                 self.assertEqual(code, 1)
                 self.assertEqual(result["error_type"], se.BadReply.__name__)
@@ -245,20 +158,20 @@ class ActionTest(ProfileFileTest):
     def test_each_action_reads_info_then_sends_its_values_once_under_the_next_id(self):
         for argv, op, payload in ACTIONS:
             with self.subTest(argv=argv):
-                machine = FakeExtension()
-                first = machine.next_id
+                machine = fake()
+                first = machine.extension.next_id
                 code, result = run_json(argv, machine)
                 self.assertEqual(code, 0)
-                self.assertEqual(machine.requests, [(INFO, 0, b""), (op, first, payload)])
+                self.assertEqual(machine.extension.requests, [(INFO, 0, b""), (op, first, payload)])
                 self.assertEqual((result["reply"]["id"], result["reply"]["status"]),
                                  (first, se.Status.ACCEPTED.name))
 
     def test_a_refusal_reports_the_id_and_status(self):
-        machine = FakeExtension()
-        machine.action_status = BUSY
+        machine = fake()
+        machine.extension.action_status = BUSY
         code, result = run_json(["game-spin", "1"], machine)
         self.assertEqual(code, 1)
-        self.assertEqual((result["id"], result["status"]), (machine.last[0], se.Status.BUSY.name))
+        self.assertEqual((result["id"], result["status"]), (machine.extension.last[0], se.Status.BUSY.name))
 
     def test_info_rules_out_mutations_before_any_is_sent(self):
         stops, max_bet = LIMITS["stops"], LIMITS["max_bet_per_line"]
@@ -273,17 +186,17 @@ class ActionTest(ProfileFileTest):
         }
         for name, (options, argv) in cases.items():
             with self.subTest(name):
-                machine = FakeExtension(**options)
+                machine = fake(**options)
                 code, _ = run_json(argv, machine)
                 self.assertEqual(code, 1)
-                self.assertEqual(machine.requests, [(INFO, 0, b"")])
+                self.assertEqual(machine.extension.requests, [(INFO, 0, b"")])
 
     def test_a_faulted_extension_gets_no_mutation(self):
-        machine = FakeExtension()
-        machine.fault = True
+        machine = fake()
+        machine.extension.fault = True
         code, _ = run_json(["outcome-cancel"], machine)
         self.assertEqual(code, 1)
-        self.assertEqual(machine.mutations(), [])
+        self.assertEqual(machine.extension.mutations(), [])
 
     def test_bad_values_are_usage_errors_before_any_traffic(self):
         for argv in (["game-spin", "1", "2"], ["outcome-arm", "1", "2"], ["outcome-arm", "1", "2", "256"],
@@ -291,7 +204,7 @@ class ActionTest(ProfileFileTest):
                      ["--id", "5", "extension-info"], ["--id", "5", "profile-upload", "p.json"],
                      ["--id", "0", "game-spin", "1"], ["--id", "5", "meters"], ["profile-upload"]):
             with self.subTest(argv=argv), self.assertRaises(SystemExit) as exit_:
-                machine = FakeExtension()
+                machine = fake()
                 try:
                     run_cli(argv, machine)
                 finally:
@@ -299,19 +212,19 @@ class ActionTest(ProfileFileTest):
             self.assertEqual(exit_.exception.code, 2)
 
     def test_an_uncertain_mutation_reports_its_id_and_is_not_repeated(self):
-        ways = {"lost reply": {"silent": {SPIN}},
+        ways = {"lost reply": {"lose": {SPIN}},
                 "garbled reply": {"tamper": lambda d: d[:8] + bytes((d[8] ^ 1,)) + d[9:] if d[6] == SPIN else d}}
         for name, faults in ways.items():
             with self.subTest(name):
-                machine = FakeExtension()
-                first = machine.next_id
-                machine.silent = faults.get("silent", set())
-                machine.tamper = faults.get("tamper")
+                machine = fake()
+                first = machine.extension.next_id
+                machine.lose = faults.get("lose", set())
+                machine.extension.tamper = faults.get("tamper")
                 code, result = run_json(["game-spin", "2"], machine)
                 self.assertEqual(code, 1)
                 self.assertEqual((result["id"], result["status"]), (first, "unknown"))
                 self.assertEqual(result["error_type"], se.UncertainOutcome.__name__)
-                self.assertEqual(machine.mutations(), [(SPIN, first, bytes((2,)))])
+                self.assertEqual(machine.extension.mutations(), [(SPIN, first, bytes((2,)))])
 
     def test_a_port_failure_or_interrupt_during_a_mutation_reports_its_id_and_stops(self):
         commands = {SPIN: ["game-spin", "2"], CHUNK: ["profile-upload", self.profile_path]}
@@ -319,146 +232,222 @@ class ActionTest(ProfileFileTest):
             for exception in (OSError(5, "Input/output error"), KeyboardInterrupt()):
                 for stage in ("send", "read"):
                     with self.subTest(argv=argv[0], exception=type(exception).__name__, stage=stage):
-                        machine = FakeExtension()
+                        machine = fake()
                         machine.failure = (op, exception, stage)
                         code, result = run_json(argv, machine)
                         self.assertEqual(code, 1)
-                        attempted = machine.mutations()[-1]
+                        attempted = machine.extension.mutations()[-1]
                         self.assertEqual(attempted[0], op)
                         self.assertEqual((result["id"], result["status"], result["error_type"]),
                                          (attempted[1], "unknown", se.UncertainOutcome.__name__))
-                        self.assertEqual([r[0] for r in machine.mutations()].count(op), 1)
+                        self.assertEqual([r[0] for r in machine.extension.mutations()].count(op), 1)
                         # nothing, not even a sync poll, went out after the attempted mutation
-                        self.assertEqual(machine.requests[-1], attempted)
+                        self.assertEqual(machine.extension.requests[-1], attempted)
                         self.assertNotEqual(machine.sent[-1][0], protocol.SYNC_POLL)
 
     def test_only_an_explicit_identical_repeat_reuses_an_id(self):
-        machine = FakeExtension()
-        first = machine.next_id
-        machine.silent = {SPIN}
+        machine = fake()
+        first = machine.extension.next_id
+        machine.lose = {SPIN}
         self.assertEqual(run_json(["game-spin", "2"], machine)[0], 1)
-        machine.silent = set()
+        machine.lose = set()
 
         code, result = run_json(["--id", str(first), "game-spin", "2"], machine)
         self.assertEqual(code, 0)
         self.assertEqual((result["reply"]["id"], result["reply"]["status"]), (first, se.Status.ACCEPTED.name))
-        self.assertEqual(machine.executed, [SPIN])
+        self.assertEqual(machine.extension.executed, [SPIN])
 
         code, result = run_json(["--id", str(first), "game-spin", "3"], machine)
         self.assertEqual((code, result["status"]), (1, se.Status.BAD_ID.name))
-        sent = len(machine.requests)
+        sent = len(machine.extension.requests)
         code, _ = run_json(["--id", str(first), "reels-jog", "1"], machine)
         self.assertEqual(code, 1)
-        self.assertNotIn(JOG, [op for op, _, _ in machine.requests[sent:]])
-        self.assertEqual(machine.executed, [SPIN])
+        self.assertNotIn(JOG, [op for op, _, _ in machine.extension.requests[sent:]])
+        self.assertEqual(machine.extension.executed, [SPIN])
 
 
 class ProfileTest(ProfileFileTest):
     def test_upload_stages_bounded_chunks_commits_and_reads_everything_back(self):
         chunk = 20
-        machine = FakeExtension(max_chunk=chunk)
-        first = machine.next_id
+        machine = fake(max_chunk=chunk)
+        first = machine.extension.next_id
         expected = sp.encode(sp.stock_profile())
         code, result = run_json(["profile-upload", self.profile_file(sp.stock_profile())], machine)
         self.assertEqual(code, 0)
-        self.assertEqual(machine.active, expected)
-        self.assertEqual(machine.requests[0], (INFO, 0, b""))
-        mutations = machine.mutations()
+        self.assertEqual(machine.extension.active, expected)
+        self.assertEqual(machine.extension.requests[0], (INFO, 0, b""))
+        mutations = machine.extension.mutations()
         chunks = -(-len(expected) // chunk)
         self.assertEqual([op for op, _, _ in mutations], [BEGIN] + [CHUNK] * chunks + [COMMIT])
         self.assertEqual([id for _, id, _ in mutations], list(range(first, first + len(mutations))))
-        reads = [struct.unpack("<HB", payload) for op, _, payload in machine.requests if op == READ]
+        reads = [struct.unpack("<HB", payload) for op, _, payload in machine.extension.requests if op == READ]
         self.assertEqual(sorted(i for offset, count in reads for i in range(offset, offset + count)),
                          list(range(len(expected))))
         reply = result["reply"]
         self.assertEqual((reply["id"], reply["generation"], int(reply["profile_crc"], 16)),
-                         (mutations[-1][1], machine.generation, zlib.crc32(expected)))
+                         (mutations[-1][1], machine.extension.generation, zlib.crc32(expected)))
 
     def test_upload_validates_within_info_caps_before_any_mutation(self):
-        machine = FakeExtension(max_bet_per_line=sp.stock_profile().max_bet_per_line - 1)
+        machine = fake(max_bet_per_line=sp.stock_profile().max_bet_per_line - 1)
         code, result = run_json(["profile-upload", self.profile_file(sp.stock_profile())], machine)
         self.assertEqual(code, 1)
         self.assertEqual(result["error_type"], sp.ProfileError.__name__)
-        self.assertEqual(machine.requests, [(INFO, 0, b"")])
+        self.assertEqual(machine.extension.requests, [(INFO, 0, b"")])
 
     def test_upload_stops_at_an_uncertain_chunk(self):
-        machine = FakeExtension()
-        first = machine.next_id
-        machine.silent = {CHUNK}
+        machine = fake()
+        first = machine.extension.next_id
+        machine.lose = {CHUNK}
         code, result = run_json(["profile-upload", self.profile_file(sp.stock_profile())], machine)
         self.assertEqual(code, 1)
         self.assertEqual((result["id"], result["status"]), (first + 1, "unknown"))
-        self.assertEqual([op for op, _, _ in machine.mutations()], [BEGIN, CHUNK])
+        self.assertEqual([op for op, _, _ in machine.extension.mutations()], [BEGIN, CHUNK])
 
     def test_upload_fails_when_the_committed_profile_reads_back_different(self):
-        machine = FakeExtension()
-        machine.corrupt_commit = True
+        machine = fake()
+        machine.extension.corrupt_commit = True
         code, result = run_json(["profile-upload", self.profile_file(sp.stock_profile())], machine)
         self.assertEqual(code, 1)
         self.assertEqual(result["error_type"], se.VerifyFailed.__name__)
 
     def test_an_interrupted_read_back_after_commit_is_not_success(self):
-        machine = FakeExtension()
-        machine.failure = (STATUS, KeyboardInterrupt(), "read")
+        machine = InterruptAfterCommit(extension=FakeExtension(action_status=ACCEPTED))
         code, result = run_json(["profile-upload", self.profile_file(sp.stock_profile())], machine)
         self.assertEqual(code, 1)
         self.assertEqual(result["error_type"], KeyboardInterrupt.__name__)
-        self.assertEqual(machine.mutations()[-1][0], COMMIT)
+        self.assertEqual(machine.extension.mutations()[-1][0], COMMIT)
 
     def test_download_prints_only_the_active_profile_on_stdout(self):
         for active in (variant(), None):
             with self.subTest(active="stock" if active is None else "profile"):
-                machine = FakeExtension()
+                machine = fake()
                 if active is not None:
-                    machine.active = sp.encode(active)
-                    machine.profile_crc = zlib.crc32(machine.active)
+                    machine.extension.active = sp.encode(active)
+                    machine.extension.profile_crc = zlib.crc32(machine.extension.active)
                 code, out, _ = run_cli(["--json", "profile-download"], machine)
                 self.assertEqual(code, 0)
                 self.assertEqual(json.loads(out), sp.to_json(active or sp.stock_profile()))
-                self.assertEqual(machine.mutations(), [])
+                self.assertEqual(machine.extension.mutations(), [])
 
     def test_download_with_a_crc_mismatch_prints_nothing(self):
-        machine = FakeExtension()
-        machine.active = sp.encode(variant())
-        machine.profile_crc = zlib.crc32(machine.active) ^ 1
+        machine = fake()
+        machine.extension.active = sp.encode(variant())
+        machine.extension.profile_crc = zlib.crc32(machine.extension.active) ^ 1
         code, out, _ = run_cli(["profile-download"], machine)
         self.assertEqual((code, out), (1, ""))
 
     def test_restore_returns_to_stock_and_confirms_it(self):
-        machine = FakeExtension()
-        first = machine.next_id
-        machine.active = sp.encode(variant())
-        machine.profile_crc = zlib.crc32(machine.active)
+        machine = fake()
+        first = machine.extension.next_id
+        machine.extension.active = sp.encode(variant())
+        machine.extension.profile_crc = zlib.crc32(machine.extension.active)
         code, result = run_json(["profile-restore"], machine)
         self.assertEqual(code, 0)
-        self.assertIsNone(machine.active)
-        self.assertEqual([op for op, _, _ in machine.requests], [INFO, RESTORE, STATUS])
-        self.assertEqual((result["reply"]["id"], result["reply"]["generation"]), (first, machine.generation))
+        self.assertIsNone(machine.extension.active)
+        self.assertEqual([op for op, _, _ in machine.extension.requests], [INFO, RESTORE, STATUS])
+        self.assertEqual((result["reply"]["id"], result["reply"]["generation"]), (first, machine.extension.generation))
 
     def test_only_profile_switches_wait_the_longer_reply_budget(self):
-        machine = FakeExtension()
+        machine = fake()
         for argv in (["profile-upload", self.profile_file(variant())], ["profile-download"],
                      ["profile-restore"], ["outcome-cancel"]):
             self.assertEqual(run_cli(argv, machine)[0], 0)
         self.assertEqual(machine.timeouts,
                          [se.PROFILE_SWITCH_REPLY_TIMEOUT if op in (COMMIT, RESTORE)
-                          else protocol.Host.RESPONSE_TIMEOUT for op, _, _ in machine.requests])
+                          else protocol.Host.RESPONSE_TIMEOUT for op, _, _ in machine.extension.requests])
 
     def test_a_lost_profile_switch_reply_is_uncertain_after_its_one_send(self):
         for op, argv in ((COMMIT, ["profile-upload", self.profile_file(variant())]),
                          (RESTORE, ["profile-restore"])):
             with self.subTest(op=op):
-                machine = FakeExtension()
-                machine.silent = {op}
+                machine = fake()
+                machine.lose = {op}
                 code, result = run_json(argv, machine)
                 self.assertEqual(code, 1)
-                attempted = machine.mutations()[-1]
+                attempted = machine.extension.mutations()[-1]
                 self.assertEqual(attempted[0], op)
                 self.assertEqual((result["id"], result["status"], result["error_type"]),
                                  (attempted[1], "unknown", se.UncertainOutcome.__name__))
-                self.assertEqual([r[0] for r in machine.mutations()].count(op), 1)
-                self.assertEqual(machine.requests[-1], attempted)
+                self.assertEqual([r[0] for r in machine.extension.mutations()].count(op), 1)
+                self.assertEqual(machine.extension.requests[-1], attempted)
                 self.assertEqual(machine.timeouts[-1], se.PROFILE_SWITCH_REPLY_TIMEOUT)
+
+
+class JournalDown(Exception):
+    pass
+
+
+class SeamTest(unittest.TestCase):
+    """The pace seam and record-before-send, on the extension API the page's worker calls."""
+
+    def extension(self, machine: FakeS6000) -> tuple[se.Extension, list[int]]:
+        """An Extension whose pace notes how many requests the machine had seen by then."""
+        paced: list[int] = []
+        ext = se.Extension(protocol.Host(machine, ADDRESS),
+                           pace=lambda: paced.append(len(machine.extension.requests)))
+        return ext, paced
+
+    def test_pace_runs_once_before_every_host_call_and_never_inside_one(self):
+        machine = fake(max_chunk=60)
+        machine.busy_replies = 1  # the first request is repeated inside its one host call
+        ext, paced = self.extension(machine)
+        se.upload(ext, variant(), record=lambda intent: None)
+        se.download(ext)
+        se.restore(ext, record=lambda intent: None)
+        se.act(ext, se.Op.CANCEL_OUTCOME, b"", record=lambda intent: None)
+        self.assertEqual(paced, list(range(len(machine.extension.requests))))
+
+    def test_a_mutation_is_recorded_with_its_exact_request_before_it_is_sent(self):
+        machine = fake()
+        ext, _ = self.extension(machine)
+        seen: list[tuple[dict, int]] = []
+        result = se.act(ext, se.Op.BET_SPIN, bytes((2,)),
+                        record=lambda intent: seen.append((intent, len(machine.extension.mutations()))))
+        [(intent, sent_before)] = seen
+        self.assertEqual(sent_before, 0)
+        self.assertEqual((intent["op"], intent["id"]), (se.Op.BET_SPIN.name, result["id"]))
+        self.assertEqual(bytes.fromhex(intent["request_hex"]), machine.messages()[-1])
+
+    def test_a_record_that_fails_sends_nothing(self):
+        machine = fake()
+        ext, _ = self.extension(machine)
+
+        def record(intent: dict) -> None:
+            raise JournalDown
+
+        for request in (lambda: se.act(ext, se.Op.BET_SPIN, bytes((2,)), record=record),
+                        lambda: se.upload(ext, variant(), record=record),
+                        lambda: se.restore(ext, record=record)):
+            with self.assertRaises(JournalDown):
+                request()
+        self.assertEqual(machine.extension.mutations(), [])
+
+    def test_upload_records_one_parent_intent_then_each_step_before_its_send(self):
+        machine = fake(max_chunk=60)
+        ext, _ = self.extension(machine)
+        previous = ext.status()
+        start = len(machine.extension.requests)
+        records: list[tuple[dict, int]] = []
+        profile = variant()
+        result = se.upload(ext, profile, record=lambda r: records.append((r, len(machine.extension.mutations()))))
+        [(intent, sent_before)] = [(r, n) for r, n in records if r.get("kind") == "intent"]
+        self.assertEqual(sent_before, 0)
+        data = sp.encode(profile)
+        self.assertEqual((intent["op"], intent["profile_crc"], intent["length"], bytes.fromhex(intent["profile_hex"])),
+                         ("upload", zlib.crc32(data), len(data), data))
+        self.assertEqual(intent["previous"], {"active": previous.active, "profile_crc": previous.profile_crc,
+                                              "generation": previous.generation})
+        self.assertEqual([op for op, _, _ in machine.extension.requests[start:start + 3]], [INFO, STATUS, BEGIN])
+        steps = [(r, n) for r, n in records if r.get("kind") == "step"]
+        self.assertEqual({r["upload_id"] for r, _ in steps}, {intent["upload_id"]})
+        self.assertEqual([{"op": r["op"], "id": r["id"]} for r, _ in steps], intent["steps"])
+        self.assertEqual([n for _, n in steps], list(range(len(steps))))  # each recorded before its own send
+        self.assertEqual([(se.Op[r["op"]], r["id"]) for r, _ in steps],
+                         [(op, id) for op, id, _ in machine.extension.mutations()])
+        self.assertEqual([bytes.fromhex(r["request_hex"]) for r, _ in steps],
+                         [m for m in machine.messages() if m[:2] == bytes((ADDRESS, POLL))
+                          and m[REQUEST_OP_AT] in (BEGIN, CHUNK, COMMIT)])
+        self.assertEqual(result["id"], steps[-1][0]["id"])
 
 
 class RecordedLine(FakeLine):
@@ -495,6 +484,11 @@ def recorded_profile(exchanges: list[dict]) -> bytes:
     return bytes(data)
 
 
+def decode_recorded_reply(exchange: dict) -> bytes:
+    """The payload of a recorded extension reply."""
+    return protocol.check_crc(bytes.fromhex(exchange["rx"]))[3 + se.REPLY_HEADER:]
+
+
 class RecordedReplyTest(ProfileFileTest):
     """The live profile upload and stock restore whose replies were captured in full
     (fixtures/s6000_profile_reply_timing.json), replayed through the real host and extension.
@@ -502,20 +496,42 @@ class RecordedReplyTest(ProfileFileTest):
 
     RECORDING = json.loads((FIXTURES / "s6000_profile_reply_timing.json").read_text())
 
-    def replay(self, action: str, line: RecordedLine) -> dict:
+    def replay(self, action: str, line: RecordedLine, record=lambda intent: None) -> dict:
         """The result of the recorded action, run again over `line`."""
-        ext = se.Extension(protocol.Host(line, ADDRESS))
+        ext = se.Extension(protocol.Host(line, ADDRESS), pace=lambda: None)
         if action == "upload":
             recording = self.RECORDING[action]
             data = recorded_profile(recording["exchanges"])
             source = recording["source"]
             self.assertEqual((f"{zlib.crc32(data):08X}", hashlib.sha256(data).hexdigest()),
                              (source["profile_crc"], source["profile_sha256"]))
-            return se.upload(ext, self.profile_file(sp.decode(data)))
-        return se.restore(ext)
+            return se.upload(ext, sp.decode(data), record=record)
+        return se.restore(ext, record=record)
 
     def line(self, action: str) -> RecordedLine:
-        return RecordedLine(self.RECORDING[action]["exchanges"])
+        """The recorded exchanges. The live upload predates the STATUS read that upload now makes
+        before BEGIN, so that one exchange is synthesized: the stock game, one generation before
+        the recorded commit, under the ID before INFO's next ID."""
+        exchanges = list(self.RECORDING[action]["exchanges"])
+        if action == "upload":
+            info = se.INFO.unpack(decode_recorded_reply(exchanges[0]))
+            verified = self.RECORDING[action]["verified"]["status"]
+            payload = struct.pack("<QBBBIIB", info[1] - 1, ARM, 0, 0, verified["generation"] - 1, 0, 0)
+            [query] = {x["tx"] for x in exchanges if x["operation"] == se.Op.STATUS.name}
+            reply = MAGIC + bytes((WIRE_VERSION, STATUS, 0)) + bytes(8) + payload
+            exchanges.insert(1, {"sequence": "synthesized", "operation": "STATUS", "tx": query,
+                                 "rx": protocol.with_crc(bytes((ADDRESS, POLL, len(reply))) + reply).hex(),
+                                 "first_byte_ms": 0})
+        return RecordedLine(exchanges)
+
+    def test_records_carry_the_exact_requests_the_live_run_sent(self):
+        for action in ("upload", "restore"):
+            with self.subTest(action):
+                records: list[dict] = []
+                self.replay(action, self.line(action), records.append)
+                sent = [x["tx"] for x in self.RECORDING[action]["exchanges"]
+                        if x["operation"] not in (se.Op.INFO.name, se.Op.STATUS.name, se.Op.READ_PROFILE.name)]
+                self.assertEqual([r["request_hex"] for r in records if "request_hex" in r], sent)
 
     def test_the_live_upload_and_restore_replay_to_their_verified_results(self):
         for action in ("upload", "restore"):

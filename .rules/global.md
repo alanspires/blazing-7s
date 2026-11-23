@@ -12,8 +12,8 @@ Reverse engineering of one Bally ProSlot 6000 "Blazing 7s" machine that the user
 
 ## Live machine
 
-- Anything that reaches the real machine (online `tools/sas` commands over SSH to the SAS host, serial probing tools, programming EPROMs, swapping chips) needs the user's explicit approval for that operation. Tests never touch hardware: serial lines, SSH and the RTOS are scripted fakes.
-- `tools/sas` online commands require `SAS_HOST` and `SAS_PORT` (no defaults; `SAS_DIR` defaults to `blazing-7s`), and `tools/sas.py` and `tools/sas_commission.py` require `--port` for serial commands. Never add a default host, port or path (`.rules/sas-host.md`).
+- Anything that reaches the real machine (online `tools/sas` commands over SSH to the SAS host, the web control page and its live check, serial probing tools, programming EPROMs, swapping chips) needs the user's explicit approval for that operation. Tests never touch hardware: serial lines, SSH and the RTOS are scripted fakes.
+- `tools/sas` online commands require `SAS_HOST` and `SAS_PORT` (no defaults; `SAS_DIR` defaults to `blazing-7s`); `tools/sas.py` and `tools/sas_commission.py` require `--port` for serial commands; and `tools/web_control.py` requires `--port`, `--listen` and `--journal`. Never add a default host, port or path (`.rules/sas-host.md`, `.rules/web-control.md`).
 - Meters are permanent: any money movement stays in lifetime accounting even when the balance is restored.
 - A missing or uncertain reply to a state-changing command is an uncertain outcome, never permission to resend. Reconcile machine state first; the owning rule gives the procedure (`.rules/sas-host-machine-tests.md`, `.rules/firmware-remote-control.md`).
 
@@ -42,9 +42,11 @@ Privacy wins over detail: when a note, fixture, test or photo would carry a pers
   ```sh
   cd tools && python3 -m unittest test_sas_protocol test_sas_commands test_sas_cli \
     test_sas_write_test test_sas_money_test test_bsg_frame test_sas_profile \
-    test_sas_extension test_sas_commission test_privacy_check
+    test_sas_extension test_sas_commission test_privacy_check \
+    test_sas_machine test_web_journal test_web_state test_web_worker \
+    test_web_views test_web_app test_web_control_live_check
   ```
 
-- Firmware and every pytest-based tools test run with `firmware/.venv/bin/python -m pytest ...` from the repository root (the full suite: `firmware/.venv/bin/python -m pytest firmware/tests tools`): there are no `__init__.py` files, and `python -m` puts the root on `sys.path` so `firmware.*` and `tools.*` imports resolve. Setup and per-slice commands are in `.rules/firmware.md`; the dev container runs the same commands (`GETTING-STARTED.md`).
+- Firmware and every pytest-based tools test run with `firmware/.venv/bin/python -m pytest ...` from the repository root (the full suite: `firmware/.venv/bin/python -m pytest firmware/tests tools`): there are no `__init__.py` files, and `python -m` puts the root on `sys.path` so `firmware.*` and `tools.*` imports resolve. Setup and per-slice commands are in `.rules/firmware.md`; the dev container runs the same commands (`GETTING-STARTED.md`). `tools/test_web_browser.py` drives Chromium through pytest-playwright: the dev container image ships the pinned Chromium, and a native venv needs `firmware/.venv/bin/playwright install chromium` once.
 - CI (`.github/workflows/ci.yml`) runs the full suite, the build-hash check against `firmware/README.md` and `privacy_check.py tree --no-private-literals` in the dev container image, and the stdlib suites above on Python 3.9; keep it green, and update it when these commands change.
 - Run `ruff check` on Python you touch; there is no committed ruff configuration, so defaults apply.

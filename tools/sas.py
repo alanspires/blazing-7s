@@ -54,6 +54,7 @@ Wiring and checks: notes/sas-j10.md. Needs pyserial (`pip install pyserial`).
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import select
@@ -62,6 +63,7 @@ import time
 
 import sas_commands as sc
 import sas_extension as se
+import sas_machine as sm
 import sas_money_test
 import sas_profile as sp
 import sas_protocol as sas
@@ -76,11 +78,14 @@ MARK, SPACE = "M", "S"  # pyserial's PARITY_MARK and PARITY_SPACE
 # bytes (§2.3.2) and the FTDI chip forwards received bytes every 16 ms by default.
 MESSAGE_GAP = 0.05
 INTER_BYTE_LIMIT = 0.005  # §2.3.2
-POLL_INTERVAL = 0.25  # §2.3.3: no faster than one poll per 200 ms per machine
 FIND_TIMEOUT = 0.1  # find polls 127 addresses, each up to 3 times
 # The S6000 stops answering polls for about 8 s while it computes a signature; the result
 # came 18 s after the request (notes/sas-j10.md, ROM signature).
-ROM_SIGNATURE_POLLS = int(60 / POLL_INTERVAL)
+ROM_SIGNATURE_POLLS = int(60 / sas.POLL_INTERVAL)
+
+
+class SerialClosed(OSError):
+    """The serial descriptor reported end of file: the adapter hung up or was unplugged."""
 
 
 class SerialLine:
@@ -124,10 +129,16 @@ class SerialLine:
             wait = MESSAGE_GAP if data else deadline - time.monotonic()
             if wait <= 0 or not select.select([fd], [], [], wait)[0]:
                 return bytes(data)
-            data += os.read(fd, 4096)
+            chunk = os.read(fd, 4096)
+            if not chunk:  # readable yet empty: end of file, never silence
+                raise SerialClosed(f"serial device closed after {len(data)} bytes of a reply")
+            data += chunk
 
     def wait(self, seconds: float) -> None:
         time.sleep(seconds)
+
+    def close(self) -> None:
+        self.port.close()
 
 
 def describe(reply: int | sas.RomSignature | sas.RealTimeEvent) -> str:
@@ -190,8 +201,38 @@ def cmd_dump(line, args) -> int:
             print(f"== {command.code:02X} {command.name} {' '.join(command.read)}".rstrip())
         print_result(result, args.json)
         answered += "error" not in result
-        line.wait(POLL_INTERVAL)
+        line.wait(sas.POLL_INTERVAL)
     return 0 if answered else 1
+
+
+def clock_time(values: list[str]) -> dt.datetime:
+    """The zone-less time set-date-time's values name, or a usage error."""
+    command = sc.BY_NAME["set-date-time"]
+    fields = dict(sc.decode(command.request, sc.encode_request(command, values)))
+    try:
+        stamp = fields["date"] + fields["time"]
+        return dt.datetime.strptime(stamp, sm.CLOCK_FORMAT)  # noqa: DTZ007 -- SAS time is zone-less
+    except ValueError as e:
+        raise sc.ArgumentError(f"set-date-time: {e}") from e
+
+
+def cmd_set_date_time(line, args, when: dt.datetime) -> int:
+    """7F gets no reply on this firmware, not even an ACK, so it goes once and a 7E read
+    confirms it (notes/sas-j10.md, "Write test")."""
+    result: dict = {"command": "set-date-time"}
+    try:
+        clock = sm.set_clock(sas.Host(line, args.address), when, record=lambda intent: None,
+                             pace=lambda: line.wait(sas.POLL_INTERVAL))
+    except sm.MachineError as e:
+        print_result(result | failure(e), args.json)
+        return 1
+    read = clock.read.strftime(sm.CLOCK_FORMAT)
+    if not clock.confirmed:
+        print_result(result | {"error": f"7E reads {read}, not the time set", "error_type": "NotConfirmed"},
+                     args.json)
+        return 1
+    print_result(result | {"reply": {"confirmed": True, "machine_time": read}}, args.json)
+    return 0
 
 
 def cmd_write_test(line, args) -> int:
@@ -312,7 +353,7 @@ def cmd_poll(line, args) -> int:
             if answering:
                 print(f"no reply from address {args.address}", file=sys.stderr, flush=True)
             answering = False
-        line.wait(POLL_INTERVAL)
+        line.wait(sas.POLL_INTERVAL)
 
 
 def cmd_rom_signature(line, args) -> int:
@@ -327,7 +368,7 @@ def cmd_rom_signature(line, args) -> int:
     host = sas.Host(line, args.address)
     host.request_rom_signature(seed)
     for _ in range(ROM_SIGNATURE_POLLS):
-        line.wait(POLL_INTERVAL)
+        line.wait(sas.POLL_INTERVAL)
         try:
             reply = host.general_poll()
         except sas.NoResponse:
@@ -402,16 +443,22 @@ def byte_values(name: str, values: list[str]) -> bytes:
         raise sc.ArgumentError(f"{name}: values are numbers 0-255: {e}") from e
 
 
+def report_intent(intent: dict) -> None:
+    """A mutation's identity and exact request, on stderr before it is sent."""
+    print(json.dumps({"intent": intent}), file=sys.stderr, flush=True)
+
+
 def prepare_extension(args):
     """Check the values before anything is sent; return the request run as ext -> reply."""
     values = extension_values(args)
+    record = report_intent if args.json else lambda intent: None
     if args.command in ACTIONS:
         op, payload = ACTIONS[args.command], byte_values(args.command, values)
-        return lambda ext: se.act(ext, op, payload, args.id)
+        return lambda ext: se.act(ext, op, payload, args.id, record=record)
     if args.command == "profile-upload":
-        return lambda ext: se.upload(ext, values[0])
+        return lambda ext: se.upload(ext, sp.read_json(values[0]), record=record)
     if args.command == "profile-restore":
-        return lambda ext: se.restore(ext, args.id)
+        return lambda ext: se.restore(ext, args.id, record=record)
     return {"extension-info": se.info, "extension-status": se.status,
             "profile-download": se.download}[args.command]
 
@@ -421,7 +468,7 @@ def cmd_extension(line, args, request) -> int:
     its read-back state and any error go to stderr."""
     result: dict = {"command": args.command}
     try:
-        reply = request(se.Extension(sas.Host(line, args.address)))
+        reply = request(se.Extension(sas.Host(line, args.address), pace=lambda: line.wait(sas.POLL_INTERVAL)))
     except se.UncertainOutcome as e:
         result |= failure(e) | {"id": e.id, "status": "unknown"}
     except se.Refused as e:
@@ -503,6 +550,9 @@ def main(argv: list[str] | None = None, open_line=SerialLine) -> int:
             request = prepare_extension(args)
             return cmd_extension(serial_line(), args, request)
         command = None if args.command in SPECIAL else sc.find(args.command)
+        if command is not None and command.name == "set-date-time":
+            when = clock_time(args.values)  # a usage error before the port opens
+            return cmd_set_date_time(serial_line(), args, when)
         special = SPECIAL.get(command.name if command else args.command)
         line = serial_line()
         return special(line, args) if special else cmd_long_poll(line, args, command)

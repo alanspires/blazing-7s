@@ -4,8 +4,10 @@ paths:
   - "tools/fixtures/s6000_write_test*"
   - "tools/sas_write_test.py"
   - "tools/sas_money_test.py"
+  - "tools/sas_machine.py"
   - "tools/test_sas_write_test.py"
   - "tools/test_sas_money_test.py"
+  - "tools/test_sas_machine.py"
 ---
 
 # SAS host machine tests
@@ -25,7 +27,14 @@ for live-machine authorization. These routines have different recovery contracts
   Convert credits using the reported whole-cent denomination, not a fixed dollar.
 - Money requests are sent once (`retry=False`), including restoration. Record
   each AFT transaction ID, direction, amount and asset BEFORE sending. Use a new
-  ID per transfer and retain it for recovery.
+  ID per transfer and retain it for recovery. `sas_machine.deposit`/`cash_out`
+  own that send and its `record` call for every caller; `MoneyTest` keeps only
+  its round-trip policy (both directions, full balance within the limit) on top,
+  and operation admission there must not grow that policy: a single deposit
+  needs only the to-machine direction.
+- A correlated terminal rejection consistent with the read-back means nothing
+  moved; report the machine's code as is (87 gets no cause without independent
+  evidence) and never follow a refused whole-balance cash-out with a partial one.
 - Pending status permits bounded interrogation, never resending the initiating
   request. Check identity, asset, type and all amounts on every response;
   completion must have no pending receipt. A different read acknowledges the
@@ -57,6 +66,10 @@ for live-machine authorization. These routines have different recovery contracts
   invalid-component probe. Startup sent before shutdown reaches its disabled
   state can be ignored; preserve bounded startup/probe recovery despite silence.
 - Clock writes are intentionally silent on this firmware; verify via read-back.
+  `sas_machine.set_clock` is the one clock set (the CLI's `set-date-time`, the
+  write test's set and restoration, the page): exactly one `7F` with
+  `retry=False`, then a `7E` read within `CLOCK_TOLERANCE`. Never repeat `7F` to
+  get an answer; SAS time is zone-less.
   Unregistering retains key/POS ID: restore their saved values before cancelling
   registration again. Do not overwrite an already registered machine in this step.
 - Keep status-only probes empty/zero and auto-rebet OFF. They are not all reads:

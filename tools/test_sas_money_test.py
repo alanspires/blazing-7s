@@ -2,11 +2,14 @@ import unittest
 from functools import partial
 
 import sas_commands as sc
+import sas_machine as sm
 import sas_money_test as money
 import sas_protocol as protocol
 from sas_testing import FakeS6000, run_machine_test
 
 run = partial(run_machine_test, money.run)
+CREDITS_METER, IN_CENTS, IN_COUNT, OUT_CENTS, OUT_COUNT = (
+    sm.MONEY_METERS[name] for name in ("credits", "in_cents", "in_count", "out_cents", "out_count"))
 
 
 def money_requests(machine: FakeS6000) -> list[tuple[str, dict]]:
@@ -19,7 +22,7 @@ def money_requests(machine: FakeS6000) -> list[tuple[str, dict]]:
             continue
         values = dict(sc.decode(command.request, protocol.check_crc(bytes((address,)) + rest)[2:],
                                 length_byte=command.request_length))
-        if command.name == "legacy-bonus" or values["transfer_code"] == money.FULL_TRANSFER:
+        if command.name == "legacy-bonus" or values["transfer_code"] == sm.FULL_TRANSFER:
             requests.append((command.name, values))
     return requests
 
@@ -40,15 +43,15 @@ class LostMoneyReply(FakeS6000):
 class PendingTransfer(FakeS6000):
     def _aft_transfer(self, values):
         reply = super()._aft_transfer(values)
-        if values["transfer_code"] == money.INTERROGATE:
-            return reply[:1] + (money.TRANSFER_PENDING,) + reply[2:]
+        if values["transfer_code"] == sm.INTERROGATE:
+            return reply[:1] + (sm.TRANSFER_PENDING,) + reply[2:]
         return reply
 
 
 class ImmediateTransfer(FakeS6000):
     def _aft_transfer(self, values):
         reply = super()._aft_transfer(values)
-        if values["transfer_code"] == money.FULL_TRANSFER:
+        if values["transfer_code"] == sm.FULL_TRANSFER:
             self.pending.clear()
             return self.last_transfer
         return reply
@@ -59,12 +62,12 @@ class LastPollWithdrawal(FakeS6000):
 
     def _aft_transfer(self, values):
         reply = super()._aft_transfer(values)
-        if values["transfer_code"] == money.FULL_TRANSFER and values["type"] == money.IN_HOUSE_TO_HOST:
-            self.remaining = money.COMPLETION_POLLS
-        elif values["transfer_code"] == money.INTERROGATE and self.remaining:
+        if values["transfer_code"] == sm.FULL_TRANSFER and values["type"] == sm.IN_HOUSE_TO_HOST:
+            self.remaining = sm.COMPLETION_POLLS
+        elif values["transfer_code"] == sm.INTERROGATE and self.remaining:
             self.remaining -= 1
             if self.remaining:
-                return reply[:1] + (money.TRANSFER_PENDING,) + reply[2:]
+                return reply[:1] + (sm.TRANSFER_PENDING,) + reply[2:]
         return reply
 
 
@@ -82,7 +85,7 @@ class InterruptedWithdrawal(FakeS6000):
 class WrongTransferId(FakeS6000):
     def _aft_transfer(self, values):
         reply = super()._aft_transfer(values)
-        if values["transfer_code"] == money.INTERROGATE:
+        if values["transfer_code"] == sm.INTERROGATE:
             return reply[:9] + ("another-transaction",) + reply[10:]
         return reply
 
@@ -90,7 +93,7 @@ class WrongTransferId(FakeS6000):
 class UnexpectedCredits(FakeS6000):
     def _legacy_bonus(self, values):
         reply = super()._legacy_bonus(values)
-        self.meters[money.CURRENT_CREDITS] += money.CREDITS
+        self.meters[CREDITS_METER] += money.CREDITS
         return reply
 
 
@@ -98,17 +101,17 @@ class MoneyTestTest(unittest.TestCase):
     def test_full_balance_round_trip_restores_credits_but_keeps_accounting(self):
         for machine in (FakeS6000(), ImmediateTransfer(), LastPollWithdrawal()):
             with self.subTest(machine=type(machine).__name__):
-                start = machine.meters[money.CURRENT_CREDITS]
+                start = machine.meters[CREDITS_METER]
                 deductible = machine.legacy_deductible
                 ok, records = run(machine)
                 self.assertEqual([r for r in records if "check" in r and not r["ok"]], [])
                 self.assertTrue(ok)
-                self.assertEqual(machine.meters[money.CURRENT_CREDITS], start)
+                self.assertEqual(machine.meters[CREDITS_METER], start)
                 self.assertEqual(machine.legacy_deductible - deductible, money.CREDITS)
                 transfers = [v for name, v in money_requests(machine) if name == "aft-transfer"]
-                amounts = [(money.IN_HOUSE_TO_MACHINE, money.CREDITS),
-                           (money.IN_HOUSE_TO_HOST, start + 2 * money.CREDITS),
-                           (money.IN_HOUSE_TO_MACHINE, start)]
+                amounts = [(sm.IN_HOUSE_TO_MACHINE, money.CREDITS),
+                           (sm.IN_HOUSE_TO_HOST, start + 2 * money.CREDITS),
+                           (sm.IN_HOUSE_TO_MACHINE, start)]
                 self.assertEqual([(v["type"], v["cashable_cents"]) for v in transfers],
                                  [(kind, credits * machine.CENTS_PER_CREDIT) for kind, credits in amounts])
                 self.assertEqual(len({v["transaction_id"] for v in transfers}), len(transfers))
@@ -116,8 +119,8 @@ class MoneyTestTest(unittest.TestCase):
                     self.assertLessEqual(len(v["transaction_id"]), 20)  # SAS wire limit
                     self.assertEqual(int(v["flags"], 16), 0)
                     self.assertEqual((v["restricted_cents"], v["nonrestricted_cents"]), (0, 0))
-                for kind, meter, count in ((money.IN_HOUSE_TO_MACHINE, money.IN_HOUSE_IN, money.IN_HOUSE_IN_COUNT),
-                                           (money.IN_HOUSE_TO_HOST, money.IN_HOUSE_OUT, money.IN_HOUSE_OUT_COUNT)):
+                for kind, meter, count in ((sm.IN_HOUSE_TO_MACHINE, IN_CENTS, IN_COUNT),
+                                           (sm.IN_HOUSE_TO_HOST, OUT_CENTS, OUT_COUNT)):
                     moved = [credits for direction, credits in amounts if direction == kind]
                     self.assertEqual(machine.meters[meter], sum(moved) * machine.CENTS_PER_CREDIT)
                     self.assertEqual(machine.meters[count], len(moved))
@@ -126,13 +129,13 @@ class MoneyTestTest(unittest.TestCase):
         for drop_at in range(1, 5):  # legacy, deposit, full withdrawal, restoration
             with self.subTest(drop_at=drop_at):
                 machine = LostMoneyReply(drop_at)
-                start = machine.meters[money.CURRENT_CREDITS]
+                start = machine.meters[CREDITS_METER]
                 ok, _ = run(machine)
                 self.assertFalse(ok)
                 self.assertTrue(machine.dropped)
                 self.assertEqual(len(money_requests(machine)), drop_at)
                 expected = (start + money.CREDITS, start + 2 * money.CREDITS, 0, start)
-                self.assertEqual(machine.meters[money.CURRENT_CREDITS], expected[drop_at - 1])
+                self.assertEqual(machine.meters[CREDITS_METER], expected[drop_at - 1])
 
     def test_interrupted_withdrawal_leaves_its_recovery_identity_in_the_log(self):
         for error in (OSError(), KeyboardInterrupt()):
@@ -140,7 +143,7 @@ class MoneyTestTest(unittest.TestCase):
                 machine = InterruptedWithdrawal(error)
                 ok, records = run(machine)
                 self.assertFalse(ok)
-                self.assertEqual(machine.meters[money.CURRENT_CREDITS], 0)
+                self.assertEqual(machine.meters[CREDITS_METER], 0)
                 requests = money_requests(machine)
                 self.assertEqual(len(requests), 3)
                 withdrawal = requests[-1][1]
@@ -151,11 +154,11 @@ class MoneyTestTest(unittest.TestCase):
 
     def test_refused_full_withdrawal_stops_with_only_test_credits_added(self):
         machine = FakeS6000(refuses_transfers_out=True)
-        start = machine.meters[money.CURRENT_CREDITS]
+        start = machine.meters[CREDITS_METER]
         ok, _ = run(machine)
         self.assertFalse(ok)
-        self.assertEqual(machine.meters[money.CURRENT_CREDITS], start + 2 * money.CREDITS)
-        self.assertEqual(machine.meters[money.IN_HOUSE_OUT], 0)
+        self.assertEqual(machine.meters[CREDITS_METER], start + 2 * money.CREDITS)
+        self.assertEqual(machine.meters[OUT_CENTS], 0)
         self.assertEqual(len(money_requests(machine)), 3)
 
     def test_pending_or_mismatched_transfer_stops_before_withdrawal(self):
@@ -164,11 +167,11 @@ class MoneyTestTest(unittest.TestCase):
                 ok, _ = run(machine)
                 self.assertFalse(ok)
                 self.assertEqual(len(money_requests(machine)), 2)
-                self.assertEqual(machine.meters[money.IN_HOUSE_OUT], 0)
+                self.assertEqual(machine.meters[OUT_CENTS], 0)
 
     def test_existing_transfer_or_disabled_play_prevents_all_money_writes(self):
         pending, disabled = FakeS6000(), FakeS6000()
-        pending.last_transfer = (0, money.TRANSFER_PENDING, 0xFF)
+        pending.last_transfer = (0, sm.TRANSFER_PENDING, 0xFF)
         disabled.game_enabled = False
         for machine in (pending, disabled):
             with self.subTest(machine=machine):

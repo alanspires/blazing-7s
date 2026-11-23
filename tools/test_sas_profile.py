@@ -2,7 +2,9 @@ import json
 import unittest
 from dataclasses import replace
 from fractions import Fraction
+from itertools import product
 from math import prod
+from unittest import mock
 
 import sas_profile as sp
 from sas_profile import Payout, Problem, ProfileError
@@ -16,6 +18,16 @@ STOCK_MASSES = {1: (29312, 4394), 2: (58912, 4610), 3: (89312, 4610)}
 REQUESTED_LINES = ((0, 0, 0), (-1, -1, -1), (1, 1, 1), (-1, 0, 1), (1, 0, -1))
 # Native record layout: symbol slots from 4, then max, min, flags, mask, match count, index, zero.
 SLOTS, MATCH_COUNT, INDEX, PAD = 4, 13, 14, 15
+# The web page's named near-misses and losses, as center-line symbol names.
+CODES = {name: code for code, name in sp.SYMBOL_NAMES.items()}
+PATTERNS = tuple((" · ".join(names), tuple(CODES[name] for name in names)) for names in (
+    ("Blazing 7", "Blazing 7", "Blank"),
+    ("Blazing 7", "Blazing 7", "Seven"),
+    ("Triple bar", "Triple bar", "Blank"),
+    ("Blank", "Bar", "Blank"),
+    ("Seven", "Blank", "Double bar"),
+))
+ALL_STOPS = tuple(product(range(sp.STOPS), repeat=sp.REELS))
 
 
 def game() -> sp.Game:
@@ -55,6 +67,21 @@ def with_payout(profile: sp.Profile, index: int, **changes) -> sp.Profile:
     return replace(profile, payouts=tuple(payouts))
 
 
+def shown(stops: tuple[int, ...], line: int = sp.CENTER) -> tuple[int, ...]:
+    """Symbols a line shows when the reels stop at stops."""
+    return sp.line_symbols(game(), stops, game().line_patterns[line])
+
+
+def shows(wanted: tuple[int, ...], symbols: tuple[int, ...]) -> bool:
+    g = game()
+    return all(seen in g.groups[want] if want in g.groups else seen == want
+               for want, seen in zip(wanted, symbols))
+
+
+def paying_lines(score: sp.SpinScore) -> list[int]:
+    return [line for line, (_, award) in enumerate(score.lines) if award]
+
+
 class StockTest(unittest.TestCase):
     def test_personality_must_be_the_installed_image(self):
         image = bytearray(sp.PERSONALITY.read_bytes())
@@ -85,6 +112,28 @@ class StockTest(unittest.TestCase):
             self.assertEqual(row.bet_per_line, row.total_bet)
             self.assertEqual(Fraction(award_mass, OUTCOME_MASS * row.bet_per_line), row.nominal_return)
             self.assertEqual(Fraction(hit_mass, OUTCOME_MASS), row.hit_frequency)
+
+    def test_record_masses_are_each_records_winning_weight(self):
+        p = stock()
+        game = sp.installed_game()
+        centre = game.line_patterns[sp.CENTER]
+        rows = {row.bet_per_line: row for row in sp.preview(p)}
+        # The first stock record pays three Blazing 7s on the centre line at the top bet only:
+        # its weight is the product, per reel, of the weights of the stops showing one there.
+        first = p.payouts[0]
+        top, symbol = first.max_bet, first.symbols[0]
+        expected = prod(sum(p.weights[stop][reel] for stop in range(sp.STOPS)
+                            if game.strips[(stop + centre[reel]) % sp.STOPS][reel] == symbol)
+                        for reel in range(sp.REELS))
+        self.assertEqual(expected, rows[top].record_masses[0])
+        for bet, row in rows.items():
+            with self.subTest(bet=bet):
+                self.assertEqual(len(p.payouts), len(row.record_masses))
+                # One line: every hit is paid by exactly one record.
+                self.assertEqual(row.hit_mass, sum(row.record_masses))
+                for index, payout in enumerate(p.payouts):
+                    if not payout.min_bet <= bet <= payout.max_bet:
+                        self.assertEqual(0, row.record_masses[index])
 
     def test_progressive_awards_are_counted_at_their_nominal_award(self):
         p = stock()
@@ -209,6 +258,163 @@ class ZeroAwardTest(unittest.TestCase):
                 self.assertEqual(before.hit_mass - each[last] - mixed, after.hit_mass)
                 self.assertEqual(Fraction(after.award_mass, after.outcome_mass * after.total_bet),
                                  after.nominal_return)
+
+
+class ScoreTest(unittest.TestCase):
+    def test_stock_blazing_sevens_pay_the_record_for_the_bet(self):
+        p = stock()
+        blazing = CODES["Blazing 7"]
+        stops = next(s for s in ALL_STOPS if shown(s) == (blazing,) * sp.REELS)
+        # Stock records 0 and 1 pay three Blazing 7s at three and two credits a line; no
+        # record that a one-credit bet may win matches them.
+        expected = {1: (None, 0), 2: (1, p.payouts[1].award), 3: (0, p.payouts[0].award)}
+        for bet, line in expected.items():
+            with self.subTest(bet=bet):
+                self.assertEqual(sp.SpinScore((line,), line[1], bet * p.lines), sp.score(p, stops, bet))
+
+    def test_lines_pay_by_their_masks_and_add_up(self):
+        stop, group = all_group_stop()
+        center = tuple(game().strips[stop])
+        exact = Payout(500, center, 1, 2, 0x10, sp.CENTER_LINE)
+        group_pay = Payout(7, (group,) * sp.REELS, 1, 2, 0, 0b110)
+        profile = sp.Profile(sp.LINE_ROWS, 2, landing((stop,) * sp.REELS),
+                             (exact, group_pay) + (filler(2),) * (sp.RECORD_COUNT - 2))
+        result = sp.score(profile, (stop,) * sp.REELS, 2)
+        self.assertEqual(((0, exact.award), (1, group_pay.award), (1, group_pay.award))
+                         + ((None, 0),) * (sp.LINE_ROWS - 3), result.lines)
+        self.assertEqual(exact.award + 2 * group_pay.award, result.total_award)
+        self.assertEqual(2 * sp.LINE_ROWS, result.total_bet)
+
+    def test_a_zero_award_match_ends_the_line_unpaid(self):
+        stop, group = all_group_stop()
+        zero = Payout(0, tuple(game().strips[stop]), 1, 1, 0, sp.CENTER_LINE)
+        paying = Payout(9, (group,) * sp.REELS, 1, 1, 0, sp.CENTER_LINE)
+        profile = sp.Profile(1, 1, stock().weights, (zero, paying) + (filler(1),) * (sp.RECORD_COUNT - 2))
+        self.assertEqual(sp.SpinScore(((0, 0),), 0, 1), sp.score(profile, (stop,) * sp.REELS, 1))
+
+    def test_a_line_reads_its_offsets_around_the_strip(self):
+        g = game()
+        below = REQUESTED_LINES[2]
+        stops = (sp.STOPS - 1, 0, sp.STOPS - 2)
+        self.assertEqual((g.strips[0][0], g.strips[1][1], g.strips[sp.STOPS - 1][2]),
+                         sp.line_symbols(g, stops, below))
+
+    def test_bets_and_stops_outside_the_game_are_refused(self):
+        p = stock()
+        for bet in (0, p.max_bet_per_line + 1):
+            with self.subTest(bet=bet), self.assertRaises(ProfileError) as caught:
+                sp.score(p, (0,) * sp.REELS, bet)
+            self.assertIs(Problem.WAGER, caught.exception.problem)
+        for stops in ((0,) * (sp.REELS - 1), (sp.STOPS,) + (0,) * (sp.REELS - 1)):
+            with self.subTest(stops=stops), self.assertRaises(ValueError):
+                sp.score(p, stops, 1)
+
+
+class CatalogueTest(unittest.TestCase):
+    def multiline(self) -> sp.Profile:
+        """Five lines, with the any-bar record paying only the line below the center."""
+        p = replace(stock(), lines=sp.LINE_ROWS)
+        return with_payout(p, self.any_bar(), line_mask=1 << 2)
+
+    def any_bar(self) -> int:
+        return next(i for i, payout in enumerate(stock().payouts)
+                    if payout.symbols == (CODES["Any bar"],) * sp.REELS)
+
+    def assertEntriesScoreAsTheirKeys(self, profile: sp.Profile, bet: int, catalogue: sp.Catalogue):
+        names = dict(PATTERNS)
+        for key, choice in catalogue.items():
+            with self.subTest(bet=bet, key=key):
+                self.assertEqual(sp.score(profile, choice.stops, bet), choice.score)
+                if key in names:
+                    self.assertTrue(shows(names[key], shown(choice.stops)))
+                else:
+                    self.assertIn(key, [choice.score.lines[line][0] for line in paying_lines(choice.score)])
+
+    def test_every_winnable_stock_record_and_pattern_scores_as_its_key_at_each_bet(self):
+        p = stock()
+        for bet in range(1, p.max_bet_per_line + 1):
+            catalogue = sp.build_catalogue(p, bet, PATTERNS)
+            self.assertEntriesScoreAsTheirKeys(p, bet, catalogue)
+            # No stock record shadows another, so each one paying at this bet has stops.
+            eligible = [i for i, payout in enumerate(p.payouts)
+                        if payout.award and payout.min_bet <= bet <= payout.max_bet]
+            self.assertEqual(eligible + [name for name, _ in PATTERNS], list(catalogue))
+
+    def test_a_custom_multiline_profile_finds_an_off_center_record_on_its_line(self):
+        p = self.multiline()
+        for bet in range(1, p.max_bet_per_line + 1):
+            catalogue = sp.build_catalogue(p, bet, PATTERNS)
+            self.assertEntriesScoreAsTheirKeys(p, bet, catalogue)
+            choice = catalogue[self.any_bar()]
+            self.assertEqual([2], paying_lines(choice.score))
+            self.assertEqual(self.any_bar(), choice.score.lines[2][0])
+            self.assertEqual(bet * sp.LINE_ROWS, choice.score.total_bet)
+
+    def test_a_pattern_prefers_stops_where_only_the_center_pays_over_a_lower_total(self):
+        # Every seven has blanks above and below it, so a diagonal shows Blank, the middle
+        # reel's center symbol, Blank. A middle Seven pays the cheap center record and the
+        # first diagonal; a middle Blazing 7 pays more, but on the center line alone.
+        seven, blazing, blank, any_seven = (CODES[name] for name in ("Seven", "Blazing 7", "Blank", "Any seven"))
+        diagonal = 1 << 3
+        records = (Payout(50, (any_seven, blazing, any_seven), 1, 1, 0, sp.CENTER_LINE),
+                   Payout(5, (any_seven, seven, any_seven), 1, 1, 0, sp.CENTER_LINE),
+                   Payout(1, (blank, seven, blank), 1, 1, 0, diagonal))
+        profile = sp.Profile(sp.LINE_ROWS, 1, stock().weights,
+                             records + (filler(1),) * (sp.RECORD_COUNT - len(records)))
+        pattern = ("Any sevens", (any_seven,) * sp.REELS)
+        choice = sp.build_catalogue(profile, 1, (pattern,))[pattern[0]]
+        self.assertEqual([sp.CENTER], paying_lines(choice.score))
+        cheapest = min(sp.score(profile, s, 1).total_award for s in ALL_STOPS if shows(pattern[1], shown(s)))
+        self.assertLess(cheapest, choice.score.total_award)
+
+    def test_ties_go_to_the_lowest_stops(self):
+        p = stock()
+        blazing = (CODES["Blazing 7"],) * sp.REELS
+        jackpot = next(i for i, payout in enumerate(p.payouts)
+                       if payout.symbols == blazing and payout.min_bet <= p.max_bet_per_line <= payout.max_bet)
+        choice = sp.build_catalogue(p, p.max_bet_per_line, PATTERNS)[jackpot]
+        self.assertEqual(min(s for s in ALL_STOPS if shown(s) == blazing), choice.stops)
+
+    def test_records_that_cannot_win_have_no_entry(self):
+        p = stock()
+        triple_bar = next(i for i, payout in enumerate(p.payouts)
+                          if payout.symbols == (CODES["Triple bar"],) * sp.REELS)
+        shadowed = triple_bar + 1  # after triple bar, so its copy of triple bar never matches first
+        zero = len(p.payouts) - 1
+        changed = with_payout(with_payout(p, shadowed, symbols=p.payouts[triple_bar].symbols), zero, award=0)
+        catalogue = sp.build_catalogue(changed, 1, PATTERNS)
+        self.assertIn(triple_bar, catalogue)
+        self.assertNotIn(shadowed, catalogue)
+        self.assertNotIn(zero, catalogue)
+        out_of_range = next(i for i, payout in enumerate(p.payouts) if payout.min_bet > 1)
+        self.assertNotIn(out_of_range, sp.build_catalogue(p, 1, PATTERNS))
+
+    def test_stops_count_whatever_their_weight(self):
+        p = stock()
+        one_spin = replace(p, weights=landing((0,) * sp.REELS))
+        for bet in range(1, p.max_bet_per_line + 1):
+            with self.subTest(bet=bet):
+                self.assertEqual(dict(sp.build_catalogue(p, bet, PATTERNS)),
+                                 dict(sp.build_catalogue(one_spin, bet, PATTERNS)))
+
+    def test_one_enumeration_builds_the_catalogue_and_is_reused(self):
+        profile = with_payout(stock(), len(stock().payouts) - 1, award=3)  # not built by another test
+        scored = []
+        real = sp._scorer
+
+        def counting(*args):
+            score_stops = real(*args)
+            return lambda stops: scored.append(stops) or score_stops(stops)
+
+        with mock.patch.object(sp, "_scorer", counting):
+            first = sp.build_catalogue(profile, 1, PATTERNS)
+            again = sp.build_catalogue(profile, 1, PATTERNS)
+        self.assertEqual(sorted(ALL_STOPS), sorted(scored))
+        self.assertIs(first, again)
+
+    def test_symbol_names_cover_the_games_codes(self):
+        self.assertLessEqual(game().symbols, set(sp.SYMBOL_NAMES))
+        self.assertEqual(len(sp.SYMBOL_NAMES), len(set(sp.SYMBOL_NAMES.values())))
 
 
 class ValidationTest(TempDirTest):

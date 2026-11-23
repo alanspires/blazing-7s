@@ -24,6 +24,10 @@ of one of these, so this repository is what it took to understand it:
   modern GCC for the 68000 and tested by running the compiled code, and the original
   ROM routines around it, in a CPU emulator. Sent over SAS, it has spun the real
   reels.
+- **Playing it from a phone.** A web control page, served by the PC that holds the
+  SAS cable, gives any phone or laptop on the home network the machine's controls:
+  credits in and out, live meters and activity, remote spins, picking the next result,
+  an odds and payouts editor, and the machine's settings.
 
 <p>
   <img src="photos/01-front.jpg" alt="The Blazing 7s cabinet from the front" width="32%">
@@ -35,6 +39,20 @@ More photos: [the door open](photos/02-door-open.jpg),
 [the backplane](photos/03-interface-board.jpg),
 [the program and personality EPROMs](photos/05-mpu-eproms.jpg) and
 [the DB9 breakout](photos/07-db9-breakout.jpg).
+
+The web control page on a laptop and a phone, running against the test suite's
+simulated machine:
+
+<p>
+  <img src="screenshots/play-laptop.png" alt="The Play screen on a laptop after a 3 Blazing 7s win, with meters and recent activity beside the reels" width="58%">
+  <img src="screenshots/play-phone.png" alt="The Play screen on a phone, with Spin, bet, cash-out and add-credits keys in thumb reach" width="18%">
+  <img src="screenshots/next-result-phone.png" alt="The Next result sheet on a phone, listing wins and near-misses to land on the next spin" width="18%">
+</p>
+<p>
+  <img src="screenshots/odds-laptop.png" alt="The Odds and payouts editor, with its live return and hit-rate preview, reel weights and paytable" width="32%">
+  <img src="screenshots/activity-laptop.png" alt="The Activity log beside the machine's lifetime meters" width="32%">
+  <img src="screenshots/settings-laptop.png" alt="Settings for play, sound, the bill acceptor and the machine clock" width="32%">
+</p>
 
 The payout and outcome features are for a privately owned machine used for
 entertainment, not for use on regulated or commercial gaming machines.
@@ -184,6 +202,8 @@ To run the tests, build the firmware or connect to your own machine, see
 
 - `photos/` seven photos of the machine (JPEG, 1600 px on the long side, metadata
   stripped, identifier labels pixelated).
+- `screenshots/` the web control page's screens (PNG), taken against the test suite's
+  simulated machine.
 - `vendor-docs/` vendor manuals, the IGT SAS 6.02 specification and vendor software
   (`vendor-docs/README.md`).
 - `roms/` merged program images (68000 big-endian, even chip = high byte):

@@ -129,4 +129,44 @@ ext_report_53:
     restore_native
     jmp 0x278fe
 
+    .globl sound_latch_entry
+sound_latch_entry:
+    /* 0x609ec 13c2004102a7 (MOVE.B D2,0x4102a7) -> JSR sound_latch_entry.
+     * Stock S6M00002B5 checked SAS sound-off (0x43e8e2) and reel-sounds-off
+     * (0x43e8e3) only at 0x60b34/0x60b76, after 0x609ec..0x60b02 had already
+     * written the unmuted code to 0x4102a7 (external sound board latch ->
+     * 0xff100a). Apply both SAS mute gates before writing 0x4102a7 so both
+     * the external sound board (code 1 = STOP) and the onboard YM2149F
+     * (table[1] = 0 -> 0x60cd4) are silenced.
+     * Preserves all registers except D2 (set to 1 when muted) and CCR on the
+     * muted/reel-off paths; the unmuted path preserves every register and SR.
+     * Stack cost: 4-byte JSR return only. */
+    btst #1,0x43e8d3
+    beq.s 3f
+    tst.b 0x43e8e2
+    beq.s 2f
+    tst.b 0x43e8e3
+    bne.s 3f
+    cmpi.l #4,%d2
+    beq.s 1f
+    cmpi.l #17,%d2
+    bne.s 3f
+1:
+    move.l %d2,0x41021c
+2:
+    moveq #1,%d2
+3:
+    move.b %d2,0x4102a7
+    rts
+
+    .globl sound_off_entry
+sound_off_entry:
+    /* 0x27ae6 4eb900000400 (JSR 0x400) -> JSR sound_off_entry inside SAS 03
+     * (sound-off) handler 0x27ad6. Immediately latches code 1 (STOP) for the
+     * external sound board (0x60d3e -> 0xff100a), then tail-jumps to 0x400
+     * (SafeRAM byte write) with the caller's exact stack frame. Zero extra
+     * stack bytes; preserves all registers. */
+    move.b #1,0x4102a7
+    jmp 0x400
+
     .section .note.GNU-stack,"",@progbits

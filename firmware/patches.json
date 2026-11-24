@@ -43,6 +43,8 @@
     {"name": "game-selected-outcome-consumed", "offset": "0x615fa", "expected": "4a390043cd59", "symbol": "game_commit_entry", "kind": "jsr"},
     {"name": "diagnostic-motion-poll", "offset": "0x5ac3c", "expected": "303900ff1014", "symbol": "motion_test10_poll", "kind": "jsr"},
     {"name": "diagnostic-motion-cleanup", "offset": "0x5af80", "expected": "4eb90005b5fe", "symbol": "motion_test10_cleanup", "kind": "jsr"},
-    {"name": "motion-test10-return", "offset": "0x5af86", "expected": "4cdf007c4e75", "symbol": "motion_test10_return", "kind": "jmp"}
+    {"name": "motion-test10-return", "offset": "0x5af86", "expected": "4cdf007c4e75", "symbol": "motion_test10_return", "kind": "jmp"},
+    {"name": "sas-sound-latch", "offset": "0x609ec", "expected": "13c2004102a7", "symbol": "sound_latch_entry", "kind": "jsr"},
+    {"name": "sas-sound-off-stop", "offset": "0x27ae6", "expected": "4eb900000400", "symbol": "sound_off_entry", "kind": "jsr"}
   ]
 }

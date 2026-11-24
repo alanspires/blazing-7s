@@ -128,7 +128,15 @@ resume play; use a qualified recovery procedure.
 ## Offline verification recorded
 
 Published image SHA-256:
-`06bef89137d206e8113bbe096a06d30dcb45e960f764d9350b777033b83e7197`.
+`c9cd49c7c9b9a431e88995befbb8ccc593a79b6bbf83904c929384a8c0fd9448`.
+
+*(Includes the two SAS sound-control hooks `sas-sound-latch` at `0x609ec` and
+`sas-sound-off-stop` at `0x27ae6`, verified in `firmware/tests/test_sound.py`:
+4-byte leaf JSR cost in the sound task and 0-byte tail jump in the SAS 03
+handler, so the external sound board latch `0x4102a7` -> `0xff100a` respects
+SAS 03 sound-off and SAS 05 reel-sounds-off alongside the onboard YM2149F.
+`U28_even.bin` SHA-256 `707852c7a7c81d7a34dc67ca1e761a43faa0c240b90a96eec76a1b909853bbc6`,
+`U43_odd.bin` SHA-256 `7ea755bbfced4537c3d6fc913a63d831ed69095c49a7112a9c0fff8538467e6e`.)*
 
 The records below were made with one toolchain installation. A fresh build with the
 documented toolchain reproduces `main.bin` and the two chip images; `ext.elf`,

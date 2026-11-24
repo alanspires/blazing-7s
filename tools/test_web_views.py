@@ -330,10 +330,21 @@ class DeckTest(unittest.TestCase):
 
     def test_no_credits_keeps_bet_selection_and_makes_add_credits_the_main_key(self):
         root = render(online(credits=0))
-        for part in ("bet-one", "max-bet"):
-            self.assertNotIn("disabled", root.one(data_part=part).attrs)
-        self.assertIn("disabled", root.one(data_part="spin").attrs)
+        self.assertNotIn("disabled", root.one(data_part="bet-one").attrs)
+        for part in ("spin", "max-bet"):
+            self.assertIn("disabled", root.one(data_part=part).attrs)
         self.assertIn("key--main", root.one(data_part="add-credits").attrs["class"].split())
+
+    def test_max_bet_shows_total_wager_for_multi_line_games_and_exact_shortfall(self):
+        five = replace(sp.stock_profile(), lines=sp.LINE_ROWS)
+        max_total = five.max_bet_per_line * five.lines
+        rich = online(profile=ws.ProfileState(True, 2, five), bet_per_line=1, credits=max_total)
+        self.assertIn(f"{max_total:,}", key_sub(render(rich), "max-bet"))
+        short = replace(rich, credits=five.lines)  # enough for 1/line Spin, not enough for Max bet
+        root = render(short)
+        self.assertNotIn("disabled", root.one(data_part="spin").attrs)
+        self.assertIn("disabled", root.one(data_part="max-bet").attrs)
+        self.assertIn(f"{max_total:,}", key_sub(root, "max-bet"))
 
     def test_add_credits_shows_the_machines_own_limit(self):
         limit = 2500
@@ -863,6 +874,78 @@ class SettingsTest(unittest.TestCase):
         switch = render(state, wv.View(page="settings")).one(data_part="sound-toggle")
         self.assertIn("is-pending", switch.attrs["class"].split())
         self.assertIn("disabled", switch.attrs)
+
+    def test_a_queued_setting_is_pending_before_in_progress_begins(self):
+        queued = ActionResult("s-q", Act.SOUND, ResultState.QUEUED)
+        state = online(settings=ws.Settings(sound=ws.Setting.ON), results=(queued,))
+        switch = render(state, wv.View(page="settings")).one(data_part="sound-toggle")
+        self.assertIn("is-pending", switch.attrs["class"].split())
+        self.assertEqual(switch.attrs.get("aria-busy"), "true")
+
+
+class PaylinesAndBusyTest(unittest.TestCase):
+    def test_raising_and_lowering_paylines_updates_non_progressive_line_masks(self):
+        state = online()
+        lines = state.ext_info.max_lines
+        raised = wv.parse_draft(state, {wv.F_LINES: str(lines)})
+        self.assertIsNone(raised.problem)
+        self.assertIsNotNone(raised.profile)
+        every_line = (1 << lines) - 1
+        for payout in raised.profile.payouts:
+            expected = sp.CENTER_LINE if payout.flags in sp.PROGRESSIVE_FLAGS else every_line
+            self.assertEqual(payout.line_mask, expected)
+        stock_hit = sp.preview(state.profile.profile)[0].hit_frequency
+        raised_hit = sp.preview(raised.profile)[0].hit_frequency
+        self.assertGreater(raised_hit, stock_hit)
+
+        # Lowering paylines back to 1 shrinks masks cleanly back to CENTER_LINE.
+        on_five = replace(state, profile=ws.ProfileState(True, 2, raised.profile))
+        lowered = wv.parse_draft(on_five, {wv.F_LINES: "1"})
+        self.assertIsNone(lowered.problem)
+        self.assertEqual(lowered.profile, sp.stock_profile())
+
+    def test_queued_and_in_progress_actions_render_loading_indicators(self):
+        spin_q = online(results=(ActionResult("s1", Act.SPIN, ResultState.QUEUED),))
+        play_root = render(spin_q)
+        self.assertEqual(banner(play_root).attrs.get("data-banner"), "busy")
+        self.assertEqual(play_root.one(data_part="spin").attrs.get("aria-busy"), "true")
+        self.assertIn("is-busy", play_root.one(data_part="spin").attrs["class"].split())
+        self.assertNotIn("disabled", play_root.one(data_part="bet-one").attrs)
+        status_pill = next(n for n in play_root.find(data_region="status") if n.parent.tag != "template")
+        self.assertEqual(status_pill.attrs.get("data-busy"), "1")
+        self.assertEqual(json.loads(status_pill.attrs["data-pending"]), ["s1"])
+
+        cash_q = online(results=(ActionResult("c1", Act.CASH_OUT, ResultState.QUEUED),))
+        self.assertEqual(render(cash_q).one(data_part="cash-out").attrs.get("aria-busy"), "true")
+
+        add_q = online(results=(ActionResult("a1", Act.ADD_CREDITS, ResultState.QUEUED),))
+        add_root = render(add_q, wv.View(page="play", sheet="add-credits"))
+        self.assertEqual(add_root.one(data_part="add-credits-submit").attrs.get("aria-busy"), "true")
+
+        for act, part_name in ((Act.APPLY_PROFILE, "apply-odds"), (Act.RESTORE_STOCK, "restore-stock")):
+            busy_odds = online(results=(ActionResult("o1", act, ResultState.QUEUED),))
+            odds_root = render(busy_odds, wv.View(page="odds"))
+            with self.subTest(act):
+                self.assertEqual(odds_root.one(data_region="odds-actions").attrs.get("data-busy"), act.value)
+                self.assertEqual(odds_root.one(data_region="odds-status").attrs.get("data-busy"), act.value)
+                self.assertEqual(odds_root.one(data_region="odds-status").attrs.get("data-tone"), "busy")
+                self.assertEqual(odds_root.one(data_part=part_name).attrs.get("aria-busy"), "true")
+
+    def test_reels_render_all_active_paylines_and_highlight_winning_lines(self):
+        stock = sp.stock_profile()
+        for lines in range(1, sp.LINE_ROWS + 1):
+            mask = (1 << lines) - 1
+            payouts = tuple(p if p.flags in sp.PROGRESSIVE_FLAGS else replace(p, line_mask=mask)
+                            for p in stock.payouts)
+            prof = replace(stock, lines=lines, payouts=payouts)
+            state = online(profile=ws.ProfileState(lines > 1, 2, prof))
+            root = render(state)
+            reels = root.one(data_region="reels")
+            with self.subTest(lines=lines):
+                self.assertEqual(reels.attrs.get("data-lines"), str(lines))
+                self.assertEqual("reels--multi" in reels.attrs["class"].split(), lines > 1)
+                drawn = {int(n.attrs["data-payline"]) for n in reels.walk() if "data-payline" in n.attrs}
+                self.assertEqual(drawn, set(range(1, lines + 1)))
 
 
 class StaticAssetsTest(unittest.TestCase):

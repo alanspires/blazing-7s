@@ -113,7 +113,7 @@ OP_ACTS = MappingProxyType({
     se.Op.RESTORE_STOCK.name: Act.RESTORE_STOCK, se.Op.BET_SPIN.name: Act.SPIN,
     se.Op.ARM_OUTCOME.name: Act.ARM, se.Op.CANCEL_OUTCOME.name: Act.CANCEL_ARM,
 })
-BET_ACTS = frozenset((Act.BET_ONE, Act.MAX_BET))
+BET_ACTS = frozenset((Act.BET_ONE,))
 
 CHECKING = "Checking what happened"
 INCONSISTENT = "The machine's records disagree: this stays blocked"
@@ -749,14 +749,9 @@ class Worker:
 
     def _winning_name(self, stops: tuple, bet_per_line: int) -> str | None:
         state = self._state
-        if state.profile is None or not 1 <= bet_per_line <= state.profile.max_bet_per_line:
+        if state.profile is None:
             return None
-        score = sp.score(state.profile.profile, tuple(stops), bet_per_line)
-        index = next((record for record, award in score.lines if award), None)
-        if index is None:
-            return None
-        found = ws.find_outcome(ws.catalogue(replace(state, bet_per_line=bet_per_line)), str(index))
-        return None if found is None else found.name
+        return ws.winning_name(state.profile.profile, tuple(stops), bet_per_line)
 
     # Actions
 
@@ -853,7 +848,7 @@ class Worker:
         elif ws.FAMILIES.get(name) is Family.EXTENSION:
             info = self._ext.info()
             self._apply_status(self._ext.status(), info)
-            if name in (Act.SPIN, Act.ARM):
+            if name in (Act.SPIN, Act.MAX_BET, Act.ARM):
                 credits, game = self._read(sm.current_credits), self._read(sm.game_meters)
                 play = not self._read(sm.play_disabled)
                 self._update(credits=credits, play_enabled=play)
@@ -867,7 +862,7 @@ class Worker:
                                               pace=self._pace))
         elif name is Act.CASH_OUT:
             self._transfer(action, sm.cash_out(self._host, record=self._recorder(action), pace=self._pace))
-        elif name is Act.SPIN:
+        elif name in (Act.SPIN, Act.MAX_BET):
             self._spin(action)
         elif name is Act.ARM:
             self._arm(action)
@@ -972,7 +967,9 @@ class Worker:
         return {"direction": "in" if intent["op"] == sm.OP_DEPOSIT else "out", "credits": intent["cents"] // cpc}
 
     def _spin(self, action: Action) -> None:
-        bet = ws.chosen_bet(self._state)
+        bet = self._state.profile.max_bet_per_line if action.name is Act.MAX_BET else ws.chosen_bet(self._state)
+        if action.name is Act.MAX_BET and self._state.bet_per_line != bet:
+            self._update(bet_per_line=bet)
         reply = sm.spin(self._ext, bet, record=self._recorder(action, self._spin_baseline))
         self._page_spin, self._spin_action = self._open[self._current], action
         self._after_mutation(reply, se.Op.BET_SPIN)

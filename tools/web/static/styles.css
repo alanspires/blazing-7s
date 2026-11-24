@@ -363,6 +363,83 @@ img {
   color: var(--color-ink);
 }
 
+.payline--top {
+  top: 16.67%;
+}
+
+.payline--bottom {
+  top: 83.33%;
+}
+
+.payline-diags {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.payline-diag {
+  stroke: var(--color-line-strong);
+  stroke-width: 2px;
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+
+.payline-diag--win {
+  stroke: var(--color-win);
+  stroke-dasharray: none;
+  opacity: 1;
+}
+
+.payline__mark--diag-tl,
+.payline__mark--diag-tr,
+.payline__mark--diag-bl,
+.payline__mark--diag-br {
+  position: absolute;
+  z-index: 3;
+  height: 16px;
+}
+
+.payline__mark--diag-tl {
+  top: 0;
+  left: 0;
+}
+
+.payline__mark--diag-tr {
+  top: 0;
+  right: 0;
+}
+
+.payline__mark--diag-bl {
+  bottom: 0;
+  left: 0;
+}
+
+.payline__mark--diag-br {
+  bottom: 0;
+  right: 0;
+}
+
+/* Multi-line games share all three rows evenly so top, bottom and diagonals line up. */
+.reels--multi .reel {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.reels--multi .reel__cell--line {
+  border-top: 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.reels--multi .reel__cell--line:last-child {
+  border-bottom: 0;
+}
+
+.reels--multi .reel__cell--line .sym {
+  transform: scale(0.84);
+}
+
 /* Phone rows share out whatever height the screen leaves; the payline row gets most. */
 .reel {
   position: relative;
@@ -1957,8 +2034,16 @@ img {
     grid-template-rows: 64px 116px 64px;
   }
 
+  .reels--multi .reel {
+    grid-template-rows: 81px 82px 81px;
+  }
+
   .reel__cell--line .sym {
     transform: scale(1.2);
+  }
+
+  .reels--multi .reel__cell--line .sym {
+    transform: scale(0.92);
   }
 
   .combo-groups {
@@ -2019,7 +2104,8 @@ img {
 }
 
 .armed-tag--win,
-.reels--win .reel__cell--line {
+.reels--win:not(.reels--multi) .reel__cell--line,
+.reels--win .reel__cell--win {
   border-color: var(--color-win);
   background: var(--color-tint-win);
 }
@@ -2107,19 +2193,55 @@ img {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .icon--turning {
+  .icon--turning,
+  .spinner {
     animation: none;
   }
 }
 
-/* Win: the payline row lights up in the win colour. */
+/* Instant button spinner while a command is sent and waiting for the machine. */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--radius-pill);
+  animation: turn 0.8s linear infinite;
+}
 
-.reels--win .payline,
-.reels--win .payline__mark {
+.key .spinner {
+  width: 16px;
+  height: 16px;
+}
+
+.is-sending {
+  cursor: progress;
+}
+
+.is-sending > .icon {
+  display: none;
+}
+
+.combo.is-sending {
+  border-color: var(--color-warn);
+  background: var(--color-tint-warn);
+}
+
+/* Win: the winning payline(s) light up in the win colour. */
+
+.reels--win:not(.reels--multi) .payline,
+.reels--win:not(.reels--multi) .payline__mark,
+.reels--win .payline--win,
+.reels--win .payline--win .payline__mark,
+.reels--win .payline__mark--win {
   background: var(--color-win);
 }
 
-.reels--win .payline__mark {
+.reels--win:not(.reels--multi) .payline__mark,
+.reels--win .payline--win .payline__mark,
+.reels--win .payline__mark--win {
   color: var(--color-on-accent);
 }
 
@@ -2181,7 +2303,8 @@ img {
   color: var(--color-ink-muted);
 }
 
-/* Spin while the machine plays the game: lit but hollow, and it ignores taps. */
+/* Spin and other deck keys while the machine works: lit, hollow, and non-pressable. */
+.key.is-busy,
 .key--spin.is-busy {
   border-color: var(--color-accent);
   background: var(--color-tint-accent);
@@ -2193,8 +2316,22 @@ img {
   font-size: var(--size-l);
 }
 
-.key--spin.is-busy .icon {
+.key.is-busy .icon,
+.btn.is-busy .icon {
   opacity: 1;
+}
+
+.btn.is-busy {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  cursor: progress;
+}
+
+.btn--flame.is-busy {
+  border-color: var(--color-accent);
+  background: var(--color-tint-accent);
+  color: var(--color-accent);
 }
 
 /* With Spin unavailable, Add credits takes the flame as the screen's one main action. */
@@ -2226,7 +2363,8 @@ img {
 
 /* Settings: a change sent and waiting for the machine to answer */
 
-.switch.is-pending {
+.switch.is-pending,
+.switch.is-sending {
   border-color: var(--color-warn);
   background: var(--color-tint-warn);
   cursor: progress;
@@ -2290,16 +2428,12 @@ button.combo {
   cursor: pointer;
 }
 
-button.combo:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 button.armed-tag__cancel {
   background: none;
   cursor: pointer;
 }
 
+button.combo:disabled,
 button.armed-tag__cancel:disabled,
 button.switch:disabled {
   opacity: 0.45;

@@ -60,6 +60,7 @@
   const OWN_LIMIT = 32;
   const ownSubmissions = new Set();
   const pendingForms = new Set();
+  const sendingButtons = new Map(); // button -> submission ID (or null before 202)
 
   function parse(markup) {
     const template = document.createElement("template");
@@ -112,9 +113,14 @@
     for (const [id, markup] of Object.entries(regions)) {
       if (!force && shown[id] === markup) continue;
       const element = region(id);
-      if (!element || isProtected(element, draftUpdate)) continue;
-      const key = focusKey(element);
+      if (!element) continue;
       const fresh = parse(markup);
+      // Let busy draft regions (Applying… / Restoring…) enter and leave their loading state
+      // without waiting for editorDirty() to clear, while leaving the editor inputs untouched.
+      const busyChange = element.hasAttribute("data-draft")
+        && (fresh.hasAttribute("data-busy") || element.hasAttribute("data-busy"));
+      if (!busyChange && isProtected(element, draftUpdate)) continue;
+      const key = focusKey(element);
       element.replaceWith(fresh);
       shown[id] = markup;
       if (key) {
@@ -151,6 +157,7 @@
     Object.assign(received, regions);
     rebaseEditor();
     applyRegions(regions, recovering, false);
+    reconcileSending();
     showOwnRefusals();
     if (editorDirty()) schedulePreview(); // the machine's profile may have moved under the draft
     const credits = region("add-credits");
@@ -296,21 +303,66 @@
     if (chip) setAmount(chip.closest("form"), Number(chip.dataset.amount), chip);
   });
 
+  function markSending(button) {
+    if (!button) return;
+    button.classList.add("is-sending");
+    button.setAttribute("aria-busy", "true");
+    if (!button.classList.contains("switch") && !button.querySelector(".spinner")) {
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      button.prepend(spinner);
+    }
+    sendingButtons.set(button, { id: null, seenPending: false });
+  }
+
+  function clearSending(button) {
+    if (!button) return;
+    button.classList.remove("is-sending");
+    button.removeAttribute("aria-busy");
+    const spinner = button.querySelector(".spinner");
+    if (spinner) spinner.remove();
+    sendingButtons.delete(button);
+  }
+
+  function reconcileSending() {
+    if (!sendingButtons.size) return;
+    const status = received.status && parse(received.status);
+    const pending = new Set(status && status.dataset.pending ? JSON.parse(status.dataset.pending) : []);
+    const settled = new Set(status && status.dataset.settled ? JSON.parse(status.dataset.settled) : []);
+    for (const [button, entry] of Array.from(sendingButtons.entries())) {
+      if (!button.isConnected) {
+        sendingButtons.delete(button);
+      } else if (entry.id !== null) {
+        if (pending.has(entry.id)) {
+          entry.seenPending = true;
+        } else if (settled.has(entry.id) || entry.seenPending) {
+          clearSending(button);
+        }
+      }
+    }
+  }
+
   document.addEventListener("submit", (event) => {
     const form = event.target;
     const action = new URL(form.action, location.href);
     if (form.method.toLowerCase() !== "post" || !action.pathname.startsWith("/actions/")) return;
     event.preventDefault();
-    if (awaiting || pendingForms.has(form)) return;
+    const submitter = event.submitter || form.querySelector('[type="submit"]');
+    if (awaiting || pendingForms.has(form) || (submitter && sendingButtons.has(submitter))) return;
     const body = new URLSearchParams(new FormData(form));
-    const submitter = event.submitter;
-    if (submitter && submitter.name) body.append(submitter.name, submitter.value);
+    if (event.submitter && event.submitter.name) body.append(event.submitter.name, event.submitter.value);
     pendingForms.add(form);
+    markSending(submitter);
     const posted = Object.fromEntries(body);
     fetch(action, { method: "POST", body, headers: { Accept: "application/json" }, credentials: "same-origin" })
       .then((response) => {
         if (response.status === 202) {
           return response.json().then((answer) => {
+            if (submitter && sendingButtons.has(submitter)) {
+              sendingButtons.get(submitter).id = answer.submission_id;
+              reconcileSending();
+            }
             if (form.id === "odds-editor") {
               ownApply = { id: answer.submission_id, values: posted };
               rebaseEditor(); // in case its verification arrived first
@@ -318,13 +370,17 @@
             noteSubmission(answer.submission_id);
           });
         }
+        clearSending(submitter);
         return response.json().catch(() => ({})).then((answer) => {
           const here = location.pathname + location.search;
           if (answer.location && answer.location !== here) location.assign(answer.location);
           else flash(answer.reason || "Not sent (" + response.status + ").");
         });
       })
-      .catch(() => flash("No answer from the server. Nothing is sent again: the page shows what happened once it hears from the server."))
+      .catch(() => {
+        clearSending(submitter);
+        flash("No answer from the server. Nothing is sent again: the page shows what happened once it hears from the server.");
+      })
       .finally(() => pendingForms.delete(form));
   });
 

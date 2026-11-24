@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator
 
 import pytest
 import sas_extension as se
+import sas_profile as sp
 import web_app
 import web_control
 import web_state as ws
@@ -520,6 +521,55 @@ def test_max_total_bet_follows_the_paylines_at_the_fixed_max_bet(site, pages):
     assert page.locator('input[name="max_bet"]').count() == 0  # shown, not edited
     page.locator(f'input[name="{wv.F_LINES}"]').fill(str(lines))
     expect(part(page, "max-total-bet")).to_have_text(re.compile(rf"^{lines * top:,}\b"))
+
+
+def test_loading_indicators_appear_while_queued_and_applying_odds(site, pages):
+    machine = site.machine
+    play = pages.open("/")
+    expect(part(play, "spin")).to_be_enabled()
+    machine.hold()
+    assert machine.stalled.wait(GUARD)
+    part(play, "spin").click()
+    expect(part(play, "spin")).to_have_attribute("aria-busy", "true")
+    expect(play.locator('[data-region="status"]')).to_have_attribute("data-busy", "1")
+    expect(banner(play)).to_have_attribute("data-banner", re.compile(r"^(busy|spinning)$"))
+    machine.release()
+    site.wait_for(lambda state: state.last_spin is not None and not state.game_running and state.in_progress is None)
+    expect(part(play, "spin")).to_be_enabled()
+
+    odds = pages.open("/odds")
+    lines = site.running.worker.snapshot().ext_info.max_lines
+    odds.locator(f'input[name="{wv.F_LINES}"]').fill(str(lines))
+    expect(part(odds, "apply-odds")).to_be_enabled()
+    machine.hold_after.add(se.Op.COMMIT_PROFILE)
+    part(odds, "apply-odds").click()
+    assert machine.stalled.wait(GUARD)
+    expect(odds.locator('[data-region="odds-actions"]')).to_have_attribute("data-busy", Act.APPLY_PROFILE.value)
+    expect(odds.locator('[data-region="odds-status"]')).to_have_attribute("data-busy", Act.APPLY_PROFILE.value)
+    expect(part(odds, "apply-odds")).to_have_attribute("aria-busy", "true")
+    machine.release()
+    site.wait_for(lambda state: verified_applies(state) == 1)
+    expect(odds.locator('[data-region="odds-actions"]')).not_to_have_attribute("data-busy", Act.APPLY_PROFILE.value)
+    applied = site.running.worker.snapshot().profile.profile
+    assert applied.lines == lines
+    every_line = (1 << lines) - 1
+    assert all(p.line_mask == (sp.CENTER_LINE if p.flags in sp.PROGRESSIVE_FLAGS else every_line)
+               for p in applied.payouts)
+
+    # Back on Play: all 5 paylines render, Max bet shows the 5-line total and spins at max bet.
+    visit(play, "/")
+    expect(play.locator('[data-region="reels"]')).to_have_attribute("data-lines", str(lines))
+    assert play.locator('[data-region="reels"] [data-payline]').count() == lines
+    top = applied.max_bet_per_line
+    expect(part(play, "max-bet")).to_contain_text(f"{top * lines:,}")
+    part(play, "bet-one").click()
+    site.wait_for(lambda state: ws.chosen_bet(state) == 1)
+    games_before = site.running.worker.snapshot().meters.games_played
+    part(play, "max-bet").click()
+    site.wait_for(lambda state: state.meters.games_played == games_before + 1
+                  and not state.game_running and state.in_progress is None)
+    assert ws.chosen_bet(site.running.worker.snapshot()) == top
+    assert site.running.worker.snapshot().last_spin.bet_per_line == top
 
 
 def test_phone_play_shows_the_reels_readings_and_every_play_button_without_scrolling(site, pages):

@@ -92,8 +92,9 @@ this slice owns how the page schedules, admits, journals and reconciles them.
   transfer limit converted exactly from cents, doors (unknown until a baseline), play
   enabled and the extension's capabilities. Display state never authorizes a write.
 - A spin or arm carries the profile generation, per-line bet and arm identity the page
-  rendered; any difference refuses it as out of date without sending. Bet one and Max bet
-  only change the server's shared chosen bet and never depend on credits.
+  rendered; any difference refuses it as out of date without sending. Bet one only changes
+  the server's shared chosen bet and never depends on credits; Max bet sets the chosen bet
+  to `max_bet_per_line` and spins at that bet, admitted like a spin at `max_bet_per_line`.
 - An odds draft is admitted for the generation its form carries, in the preview, the
   no-script Preview (GET `/odds`, `View.generation`) and the apply POST, never the
   snapshot's; a draft with no generation is admitted for none. `live.js` rebases its editor

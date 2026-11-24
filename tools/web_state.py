@@ -75,9 +75,9 @@ class Act(enum.Enum):
 
 FAMILIES = MappingProxyType({
     Act.ADD_CREDITS: Family.MONEY, Act.CASH_OUT: Family.MONEY,
-    Act.SPIN: Family.EXTENSION, Act.ARM: Family.EXTENSION, Act.CANCEL_ARM: Family.EXTENSION,
-    Act.APPLY_PROFILE: Family.EXTENSION, Act.RESTORE_STOCK: Family.EXTENSION,
-    Act.PLAY: Family.PLAY,
+    Act.MAX_BET: Family.EXTENSION, Act.SPIN: Family.EXTENSION, Act.ARM: Family.EXTENSION,
+    Act.CANCEL_ARM: Family.EXTENSION, Act.APPLY_PROFILE: Family.EXTENSION,
+    Act.RESTORE_STOCK: Family.EXTENSION, Act.PLAY: Family.PLAY,
 })
 
 
@@ -402,6 +402,13 @@ def _spin(state: MachineState, action: Action) -> tuple[Code, str] | None:
             or _spin_arm(state) or _credits(state))
 
 
+def _max_bet(state: MachineState, action: Action) -> tuple[Code, str] | None:
+    top = None if state.profile is None else state.profile.max_bet_per_line
+    return (_play_gate(state, se.Capability.SPIN) or _pending(state, action.name)
+            or _out_of_date(state, action, generation=True, arm=True)
+            or _spin_arm(state, bet=top) or _credits(state, bet=top))
+
+
 def _arm(state: MachineState, action: Action) -> tuple[Code, str] | None:
     return (_play_gate(state, se.Capability.OUTCOME) or _pending(state, action.name)
             or _out_of_date(state, action, generation=True, bet=True)
@@ -456,7 +463,7 @@ def _setting(state: MachineState, action: Action) -> tuple[Code, str] | None:
 
 
 _RULES = MappingProxyType({
-    Act.BET_ONE: _bet_selection, Act.MAX_BET: _bet_selection, Act.SPIN: _spin, Act.ARM: _arm,
+    Act.BET_ONE: _bet_selection, Act.MAX_BET: _max_bet, Act.SPIN: _spin, Act.ARM: _arm,
     Act.CANCEL_ARM: _cancel_arm, Act.APPLY_PROFILE: _profile_change,
     Act.RESTORE_STOCK: _profile_change, Act.ADD_CREDITS: _add_credits, Act.CASH_OUT: _cash_out,
     Act.PLAY: _setting, Act.SOUND: _setting, Act.BILLS: _setting, Act.CLOCK_SYNC: _setting,
@@ -500,9 +507,9 @@ def _pending(state: MachineState, name: Act) -> tuple[Code, str] | None:
         return None
     if status.last_op == se.Op.ARM_OUTCOME:
         correlated = state.arm.state is ArmState.ARMED and state.arm.arm_id == status.last_id
-        if name is Act.CANCEL_ARM or (name is Act.SPIN and correlated):
+        if name is Act.CANCEL_ARM or (name in (Act.SPIN, Act.MAX_BET) and correlated):
             return None
-        if name is Act.SPIN:
+        if name in (Act.SPIN, Act.MAX_BET):
             return Code.ARM_UNSETTLED, "Cancel the next result first"
         return Code.ARM_SET, "Cancel the next result first"
     if status.last_op == se.Op.BET_SPIN:
@@ -519,11 +526,12 @@ def _out_of_date(state: MachineState, action: Action, *, generation: bool = Fals
     return None
 
 
-def _spin_arm(state: MachineState) -> tuple[Code, str] | None:
+def _spin_arm(state: MachineState, *, bet: int | None = None) -> tuple[Code, str] | None:
     arm = state.arm
     if arm.state in (ArmState.HELD, ArmState.UNKNOWN):
         return Code.ARM_UNSETTLED, "Cancel the next result first"
-    if arm.state is ArmState.ARMED and arm.bet_per_line != chosen_bet(state):
+    target = chosen_bet(state) if bet is None else bet
+    if arm.state is ArmState.ARMED and arm.bet_per_line != target:
         return Code.ARM_BET, f"The next result is set for a bet of {arm.bet_per_line}"
     return None
 
@@ -534,8 +542,8 @@ def _nothing_armed(state: MachineState) -> tuple[Code, str] | None:
     return None
 
 
-def _credits(state: MachineState) -> tuple[Code, str] | None:
-    total = total_wager(state)
+def _credits(state: MachineState, *, bet: int | None = None) -> tuple[Code, str] | None:
+    total = total_wager(state) if bet is None else bet * state.profile.lines
     if not state.credits:
         return Code.NO_CREDITS, "No credits"
     if state.credits < total:
@@ -715,3 +723,33 @@ def outcome_name(wanted: tuple[int, ...], landed: tuple[int, ...], kind: Kind) -
         mixed = " (mixed)" if len(set(landed)) > 1 else ""
         return f"Any {len(wanted)} {group}s{mixed}"
     return " · ".join(names[symbol] for symbol in wanted)
+
+
+def winning_name(profile: sp.Profile, stops: tuple[int, ...], bet_per_line: int) -> str | None:
+    """Every winning combination across the profile's active lines, in line order.
+    Single-line profiles return the combination name alone; multi-line profiles name
+    each winning line and group identical winners (e.g. '3 Blanks (lines 2, 3)')."""
+    if not 1 <= bet_per_line <= profile.max_bet_per_line:
+        return None
+    score = sp.score(profile, tuple(stops), bet_per_line)
+    game = sp.installed_game()
+    by_name: dict[str, list[int]] = {}
+    for line_idx, (record, award) in enumerate(score.lines):
+        if not award or record is None:
+            continue
+        payout = profile.payouts[record]
+        landed = sp.line_symbols(game, tuple(stops), game.line_patterns[line_idx])
+        name = outcome_name(payout.symbols, landed, Kind.WIN)
+        by_name.setdefault(name, []).append(line_idx + 1)
+    if not by_name:
+        return None
+    if profile.lines == 1:
+        return next(iter(by_name))
+    parts = []
+    for name, line_nums in by_name.items():
+        if len(line_nums) == 1:
+            parts.append(f"{name} (line {line_nums[0]})")
+        else:
+            joined = ", ".join(str(n) for n in line_nums)
+            parts.append(f"{name} (lines {joined})")
+    return " + ".join(parts)

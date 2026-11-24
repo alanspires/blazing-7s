@@ -301,16 +301,19 @@ class SurfaceTest(WorkerTest):
         over = rig.submit(Act.ADD_CREDITS, "over", amount=rig.state.aft.limit_credits + 1)
         self.assertEqual(over.code, Code.OVER_LIMIT)
 
-    def test_bet_one_and_max_bet_change_only_the_chosen_bet(self):
+    def test_bet_one_changes_only_the_chosen_bet_and_max_bet_spins_at_max(self):
         rig = self.rig()
         rig.start()
         sent = len(rig.machine.sent)
         top = rig.state.profile.max_bet_per_line
         rig.assertSubmitted(rig.submit(Act.BET_ONE, "bet"))
         self.assertEqual(ws.chosen_bet(rig.state), top % top + 1)
-        rig.assertSubmitted(rig.submit(Act.MAX_BET, "max"))
-        self.assertEqual(ws.chosen_bet(rig.state), top)
         self.assertEqual(len(rig.machine.sent), sent)
+        result = rig.act(Act.MAX_BET, "max")
+        self.assertEqual((result.state, result.outcome), (ResultState.DONE, OutcomeWord.PLAYED))
+        self.assertEqual(ws.chosen_bet(rig.state), top)
+        self.assertEqual(result.evidence.bet_per_line, top)
+        self.assertEqual(rig.mutations(SPIN), 1)
 
 
 class PacingTest(WorkerTest):

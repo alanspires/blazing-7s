@@ -71,6 +71,7 @@ F_LINES = "lines"
 
 # The expected values each action carries because admit compares them against fresh state.
 EXPECTED = MappingProxyType({
+    Act.MAX_BET: (F_GENERATION, F_ARM),
     Act.SPIN: (F_GENERATION, F_BET, F_ARM),
     Act.ARM: (F_GENERATION, F_BET),
     Act.CANCEL_ARM: (F_ARM,),
@@ -255,15 +256,16 @@ def parse_draft(state: ws.MachineState, fields: Mapping[str, str]) -> Draft:
     if base is None:
         return Draft(fields, None, "The machine's game is not known yet")
     try:
+        lines = _field_int(fields, F_LINES, base.lines, "Paylines")
         weights = tuple(tuple(_field_int(fields, f"w-{stop}-{reel}", row[reel],
                                          f"Reel {reel + 1} position {stop + 1} weight")
                               for reel in range(sp.REELS))
                         for stop, row in enumerate(base.weights))
         payouts = tuple(_replace_award(payout, _field_int(fields, f"award-{index}", payout.award,
-                                                          f"Award {index + 1}"))
+                                                          f"Award {index + 1}"),
+                                       _line_mask_for(payout, lines))
                         for index, payout in enumerate(base.payouts))
-        profile = sp.Profile(_field_int(fields, F_LINES, base.lines, "Paylines"), base.max_bet_per_line,
-                             weights, payouts)
+        profile = sp.Profile(lines, base.max_bet_per_line, weights, payouts)
         caps = {} if state.ext_info is None else state.ext_info.caps()
         sp.validate(profile, **caps)
     except (ValueError, sp.ProfileError) as error:
@@ -471,14 +473,28 @@ def _centre_symbols(stops: Sequence[int]) -> tuple[int, ...]:
     return sp.line_symbols(game, tuple(stops), game.line_patterns[sp.CENTER])
 
 
-def _short(refusal: ws.Refusal, state: ws.MachineState) -> str:
+def _short(refusal: ws.Refusal, state: ws.MachineState, *, need: int | None = None) -> str:
     if refusal.code is Code.CREDITS:
-        return f"{SHORT[Code.CREDITS]} {_n(ws.total_wager(state))}"
+        return f"{SHORT[Code.CREDITS]} {_n(ws.total_wager(state) if need is None else need)}"
     return SHORT[refusal.code]
 
 
 def _coins(bet: int) -> str:
     return _plural(bet, "coin")
+
+
+def _max_bet_text(state: ws.MachineState) -> str:
+    """The Max bet key's wager label: total credits for multi-line games, coins for 1-line."""
+    profile = state.profile
+    if profile is None:
+        return ""
+    top = profile.max_bet_per_line
+    total = top * profile.lines
+    money = _dollars(total, state.cents_per_credit, cents=False)
+    money = f"{SEP}{money}" if money else ""
+    if profile.lines == 1:
+        return f"{_coins(top)}{money}"
+    return f"{_plural(total, 'credit')}{money}"
 
 
 def _wager_text(state: ws.MachineState, bet: int) -> str:
@@ -546,8 +562,18 @@ def _field_int(fields: Mapping[str, str], name: str, default: int, what: str) ->
     return int(text)
 
 
-def _replace_award(payout: sp.Payout, award: int) -> sp.Payout:
-    return sp.Payout(award, payout.symbols, payout.min_bet, payout.max_bet, payout.flags, payout.line_mask)
+def _line_mask_for(payout: sp.Payout, lines: int) -> int:
+    """Line mask for a paytable record under `lines` active paylines: non-progressive records
+    pay on every active line; progressive records stay on the center line as the firmware requires."""
+    if payout.flags in sp.PROGRESSIVE_FLAGS:
+        return sp.CENTER_LINE
+    if 1 <= lines <= sp.LINE_ROWS:
+        return (1 << lines) - 1
+    return payout.line_mask
+
+
+def _replace_award(payout: sp.Payout, award: int, line_mask: int) -> sp.Payout:
+    return sp.Payout(award, payout.symbols, payout.min_bet, payout.max_bet, payout.flags, line_mask)
 
 
 @lru_cache(maxsize=8)
@@ -595,6 +621,8 @@ def _topbar(ctx: _Ctx, status: str) -> str:
 def _status(ctx: _Ctx) -> str:
     state = ctx.state
     door = ws.open_door(state)
+    active = _active_action(state)
+    busy = False
     if state.link is Link.OFFLINE:
         tone, dot, main = "danger", "danger", "Offline"
         since = _clock(state.last_reply_time)
@@ -612,16 +640,25 @@ def _status(ctx: _Ctx) -> str:
         short, detail = "· Play stopped", f"· Online{SEP}{_e(door)} open"
     elif not state.play_enabled:
         tone, dot, main, short, detail = "warn", "warn", "Play off", "· Online", f"· Online{SEP}play off"
+    elif _spinning(state) or active is not None:
+        busy = True
+        tone, dot = "", "ok"
+        main = "Spinning…" if _spinning(state) else "Working…"
+        label = ACTION_LABELS[active[0]] if active is not None else "Spin"
+        short, detail = "", f"· {_e(label)}"
     else:
         tone, dot, main = "", "ok", "Online"
         doors = "doors not read yet" if state.doors is None else "doors closed"
         short, detail = "· Play enabled", f"· Play enabled{SEP}{doors}"
     cls = f" status-pill--{tone}" if tone else ""
+    mark = _icon("loader-circle", "icon icon--s icon--turning") if busy else f'<span class="dot dot--{dot}"></span>'
+    busy_attr = ' data-busy="1"' if busy else ""
     short_html = f'<span class="status-pill__short">{short}</span>' if short else ""
     detail_html = f'<span class="status-pill__detail">{detail}</span>' if detail else ""
     return (f'<p class="status-pill{cls}" id="machine-status" data-region="status" '
-            f'data-refused="{_e(_refusals(state))}">'
-            f'<span class="dot dot--{dot}"></span><span class="status-pill__main">{main}</span>'
+            f'data-refused="{_e(_refusals(state))}" data-pending="{_e(_pending_ids(state))}" '
+            f'data-settled="{_e(_settled_ids(state))}"{busy_attr}>'
+            f'{mark}<span class="status-pill__main">{main}</span>'
             f'{short_html}{detail_html}</p>')
 
 
@@ -807,9 +844,18 @@ def _banner_paused(ctx: _Ctx) -> str | None:
                 "Settings</a>.")
 
 
+def _active_action(state: ws.MachineState) -> tuple[Act, ws.Action | None] | None:
+    """The action currently waiting on or running against the machine: (act, running_action_or_None)."""
+    if state.in_progress is not None:
+        return state.in_progress.name, state.in_progress
+    queued = next((r for r in state.results if r.state is ResultState.QUEUED), None)
+    return None if queued is None else (queued.action, None)
+
+
 def _spinning(state: ws.MachineState) -> bool:
     """A game is running: this page's spin, or one started at the machine."""
-    return state.game_running or (state.in_progress is not None and state.in_progress.name is Act.SPIN)
+    return state.game_running or (state.in_progress is not None
+                                  and state.in_progress.name in (Act.SPIN, Act.MAX_BET))
 
 
 def _spin_bet(state: ws.MachineState) -> int | None:
@@ -817,26 +863,36 @@ def _spin_bet(state: ws.MachineState) -> int | None:
     at the machine, whose wager the page never learns, and for a spin recovered from the
     journal, which the snapshot names without its bet: the page's chosen bet is neither."""
     action = state.in_progress
-    return action.bet_per_line if action is not None and action.name is Act.SPIN else None
+    if action is None:
+        return None
+    if action.name is Act.SPIN:
+        return action.bet_per_line
+    if action.name is Act.MAX_BET and state.profile is not None:
+        return state.profile.max_bet_per_line
+    return None
 
 
 def _banner_running(ctx: _Ctx) -> str | None:
     state = ctx.state
-    action = state.in_progress
-    if action is None or action.name is Act.SPIN:
-        if not _spinning(state):
-            return None
+    active = _active_action(state)
+    if _spinning(state):
         bet = _spin_bet(state)
         wager = "" if bet is None else f" {_coins(bet)}."
         return _tag("spinning", "quiet", _icon("loader-circle", "icon icon--turning"),
                     f"<strong>Spinning…{wager}</strong> Bet and Cash out wait until the reels stop.")
-    amount = action.params.get(F_AMOUNT)
-    text = {Act.ADD_CREDITS: f"Adding {_n(amount)} credits…" if isinstance(amount, int) else "Adding credits…",
+    if active is None:
+        return None
+    act, action = active
+    amount = None if action is None else action.params.get(F_AMOUNT)
+    text = {Act.SPIN: "Starting spin…",
+            Act.MAX_BET: "Starting max bet spin…",
+            Act.ADD_CREDITS: f"Adding {_n(amount)} credits…" if isinstance(amount, int) else "Adding credits…",
             Act.CASH_OUT: "Cashing out the whole balance…",
             Act.ARM: "Setting the next result…",
             Act.CANCEL_ARM: "Cancelling the next result…",
             Act.APPLY_PROFILE: "Applying the odds to the machine…",
-            Act.RESTORE_STOCK: "Restoring the stock game…"}.get(action.name, "Sending to the machine…")
+            Act.RESTORE_STOCK: "Restoring the stock game…",
+            Act.CLOCK_SYNC: "Setting the machine clock…"}.get(act, "Sending to the machine…")
     return _tag("busy", "quiet", _icon("loader-circle", "icon icon--turning"), f"<strong>{text}</strong>")
 
 
@@ -884,7 +940,7 @@ def _banner_result(ctx: _Ctx) -> str | None:
         return None
     money = state.cents_per_credit
     paid = None if result.evidence is None else result.evidence.paid
-    if result.action is Act.SPIN and result.outcome in GAME_OVER and paid:
+    if result.action in (Act.SPIN, Act.MAX_BET) and result.outcome in GAME_OVER and paid:
         name = _spin_name(state)
         dollars = _dollars(paid, money, cents=False)
         dollars = f" ({dollars})" if dollars else ""
@@ -916,7 +972,7 @@ def _banner_result(ctx: _Ctx) -> str | None:
                     f"{reason}{after}",
                     _ok_link(ctx, "refused-dismiss", result.submission_id), wrap=True,
                     attrs=_status_attr(result))
-    if result.action is Act.SPIN and result.outcome in STOPPED:
+    if result.action in (Act.SPIN, Act.MAX_BET) and result.outcome in STOPPED:
         return _tag("interrupted", "warn", _icon("triangle-alert"),
                     "<strong>The spin didn't finish.</strong> The machine stopped the game; the "
                     "credits and meters show what it counted.",
@@ -972,6 +1028,20 @@ def _refusals(state: ws.MachineState) -> str:
     return json.dumps(refused, ensure_ascii=False)
 
 
+def _pending_ids(state: ws.MachineState) -> str:
+    """Submission IDs still queued or running, as JSON for static/live.js."""
+    ids = [r.submission_id for r in state.results if r.state in (ResultState.QUEUED, ResultState.RUNNING)]
+    if state.in_progress is not None and state.in_progress.submission_id not in ids:
+        ids.insert(0, state.in_progress.submission_id)
+    return json.dumps(ids, ensure_ascii=False)
+
+
+def _settled_ids(state: ws.MachineState) -> str:
+    """Submission IDs in the ring that have left queued/running (done, refused or checking)."""
+    ids = [r.submission_id for r in state.results if r.state not in (ResultState.QUEUED, ResultState.RUNNING)]
+    return json.dumps(ids, ensure_ascii=False)
+
+
 def _checked(ctx: _Ctx, result: ws.ActionResult) -> str:
     state = ctx.state
     label = _e(ACTION_LABELS[result.action])
@@ -1012,7 +1082,11 @@ def _banner_no_credits(ctx: _Ctx) -> str | None:
 
 
 def _spin_name(state: ws.MachineState) -> str:
-    """The newest spin's result name, as the worker journaled it, or its centre-line symbols."""
+    """The newest spin's winning name across all active lines, or its centre-line symbols."""
+    if state.profile is not None and state.last_spin is not None:
+        name = ws.winning_name(state.profile.profile, state.last_spin.stops, state.last_spin.bet_per_line)
+        if name:
+            return name
     record = next((r for r in state.log if r.get("kind") == "spin"), None)
     if record is not None and record.get("name"):
         return str(record["name"])
@@ -1032,25 +1106,72 @@ def _reels(ctx: _Ctx) -> str:
     spin = state.last_spin
     stops = spin.stops if spin is not None else (0,) * sp.REELS
     game = sp.installed_game()
+    lines = state.profile.lines if state.profile is not None else 1
+    multi = lines > 1
     spinning = _spinning(state)
-    cls = "reels"
+    cls = "reels" + (" reels--multi" if multi else "")
     newest = state.results[0] if state.results else None
+    is_win = (state.link is Link.ONLINE and not spinning and newest is not None
+              and newest.evidence is not None and newest.evidence.paid
+              and newest.submission_id != ctx.view.seen)
+    winning_lines: set[int] = set()
     if state.link is not Link.ONLINE:
         cls += " reels--stale"
-    elif (not spinning and newest is not None and newest.evidence is not None and newest.evidence.paid
-          and newest.submission_id != ctx.view.seen):
+    elif is_win:
         cls += " reels--win"
+        if (state.profile is not None and spin is not None
+                and 1 <= spin.bet_per_line <= state.profile.max_bet_per_line):
+            score = sp.score(state.profile.profile, tuple(stops), spin.bet_per_line)
+            winning_lines = {idx for idx, (_, award) in enumerate(score.lines) if award}
+        if not winning_lines:
+            winning_lines = {sp.CENTER}
+    active_rows = {game.line_patterns[line][reel] for line in range(min(lines, len(game.line_patterns)))
+                   for reel in range(sp.REELS)}
+    winning_cells = {(reel, game.line_patterns[line][reel])
+                     for line in winning_lines if line < len(game.line_patterns)
+                     for reel in range(sp.REELS)}
     reels = []
     for reel, stop in enumerate(stops):
         cells = []
-        for offset, row in ((-1, "edge"), (0, "line"), (1, "edge")):
+        for offset in (-1, 0, 1):
+            row = "line" if offset in active_rows else "edge"
+            win_cls = " reel__cell--win" if (reel, offset) in winning_cells else ""
             code = game.strips[(stop + offset) % sp.STOPS][reel]
-            cells.append(f'<span class="reel__cell reel__cell--{row}">{_symbol(code, "reel")}</span>')
+            cells.append(f'<span class="reel__cell reel__cell--{row}{win_cls}">{_symbol(code, "reel")}</span>')
         spin_cls, label = (" reel--spinning", f"Reel {reel + 1}, spinning") if spinning else ("", f"Reel {reel + 1}")
         reels.append(f'<div class="reel{spin_cls}" aria-label="{label}">{"".join(cells)}</div>')
-    return (f'<div class="{cls}" data-region="reels"><span class="payline" aria-hidden="true">'
-            '<span class="payline__mark">1</span><span class="payline__mark">1</span></span>'
-            f'{"".join(reels)}</div>')
+    overlays = []
+    for idx, pos in ((0, "center"), (1, "top"), (2, "bottom")):
+        if idx >= lines:
+            continue
+        win = " payline--win" if idx in winning_lines else ""
+        num = idx + 1
+        overlays.append(
+            f'<span class="payline payline--{pos}{win}" data-payline="{num}" aria-hidden="true">'
+            f'<span class="payline__mark">{num}</span><span class="payline__mark">{num}</span></span>')
+    if lines >= 4:
+        diags = []
+        diag_marks = []
+        for idx, (y1, y2, left_pos, right_pos) in (
+                (3, ("16.67", "83.33", "diag-tl", "diag-br")),
+                (4, ("83.33", "16.67", "diag-bl", "diag-tr"))):
+            if idx >= lines:
+                continue
+            win = " payline-diag--win" if idx in winning_lines else ""
+            mark_win = " payline__mark--win" if idx in winning_lines else ""
+            num = idx + 1
+            diags.append(
+                f'<line class="payline-diag{win}" data-payline="{num}" '
+                f'x1="2" y1="{y1}" x2="98" y2="{y2}" vector-effect="non-scaling-stroke"/>')
+            diag_marks.append(
+                f'<span class="payline__mark payline__mark--{left_pos}{mark_win}" '
+                f'data-payline-mark="{num}" aria-hidden="true">{num}</span>'
+                f'<span class="payline__mark payline__mark--{right_pos}{mark_win}" '
+                f'data-payline-mark="{num}" aria-hidden="true">{num}</span>')
+        overlays.append(
+            '<svg class="payline-diags" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'
+            f'{"".join(diags)}</svg>{"".join(diag_marks)}')
+    return f'<div class="{cls}" data-region="reels" data-lines="{lines}">{"".join(overlays)}{"".join(reels)}</div>'
 
 
 def _last_spin(ctx: _Ctx) -> str:
@@ -1063,11 +1184,16 @@ def _last_spin(ctx: _Ctx) -> str:
     if spin is None:
         return ('<p class="last-spin" data-region="last-spin"><span class="last-spin__label">Last spin</span> '
                 "none yet</p>")
+    wager = (_plural(spin.total_bet, "credit")
+             if spin.total_bet and spin.total_bet != spin.bet_per_line else _coins(spin.bet_per_line))
+    multi_win = (ws.winning_name(state.profile.profile, spin.stops, spin.bet_per_line)
+                 if spin.paid and state.profile is not None and state.profile.lines > 1 else None)
+    reels_text = _e(multi_win) if multi_win else _symbols_text(_centre_symbols(spin.stops))
     result = (f'<span class="won">won{NBSP}{_n(spin.paid)}</span>' if spin.paid
               else f"lost{NBSP}{_n(spin.total_bet)}")
     return (f'<p class="last-spin" data-region="last-spin"><span class="last-spin__label">Last spin</span> '
-            f"{_clock(spin.time)}{SEP}{_coins(spin.bet_per_line)}"
-            f'<span class="last-spin__reels">{SEP}{_symbols_text(_centre_symbols(spin.stops))}</span>'
+            f"{_clock(spin.time)}{SEP}{wager}"
+            f'<span class="last-spin__reels">{SEP}{reels_text}</span>'
             f"{SEP}{result}</p>")
 
 
@@ -1123,8 +1249,8 @@ def _disabled(refusal: ws.Refusal | None) -> str:
 
 
 def _key(ctx: _Ctx, part: str, cls: str, icon: str, label: str, sub: str, refusal: ws.Refusal | None,
-         form: str) -> str:
-    sub = sub if refusal is None else _e(_short(refusal, ctx.state))
+         form: str, *, need: int | None = None) -> str:
+    sub = sub if refusal is None else _e(_short(refusal, ctx.state, need=need))
     return (f'<button class="key {cls}" type="submit" form="{form}" data-part="{part}"'
             f'{_disabled(refusal)}>{icon}<span class="key__label">{label}</span>'
             f'<span class="key__sub">{sub}</span></button>')
@@ -1134,29 +1260,49 @@ def _deck(ctx: _Ctx) -> str:
     state, view = ctx.state, ctx.view
     profile = state.profile
     top = None if profile is None else profile.max_bet_per_line
+    max_total = None if profile is None else top * profile.lines
     bet = ws.chosen_bet(state)
     bet_one = ctx.admit(Act.BET_ONE)
     max_bet = ctx.admit(Act.MAX_BET)
     spin = ctx.admit(Act.SPIN)
     cash_out = ctx.admit(Act.CASH_OUT)
     add = ctx.admit(Act.ADD_CREDITS)
+    active = _active_action(state)
+    active_act = None if active is None else active[0]
     keys = [
         _key(ctx, "bet-one", "key--bet", _icon("coins"), "<span>Bet</span> <span>one</span>",
              "Back to 1 coin" if bet is not None and bet == top else "+1 coin", bet_one, "act-bet-one"),
-        _key(ctx, "max-bet", "key--max", _icon("chevrons-up"), "<span>Max</span> <span>bet</span>",
-             _coins(top) if top else "", max_bet, "act-max-bet"),
     ]
+    if active_act is Act.MAX_BET and not _spinning(state):
+        keys.append('<button class="key key--max is-busy" type="button" disabled aria-busy="true" '
+                    f'data-part="max-bet">{_icon("loader-circle", "icon icon--turning")}'
+                    '<span class="key__label"><span>Max</span> <span>bet</span></span>'
+                    f'<span class="key__sub">{_max_bet_text(state)}</span></button>')
+    else:
+        keys.append(_key(ctx, "max-bet", "key--max", _icon("chevrons-up"), "<span>Max</span> <span>bet</span>",
+                         _max_bet_text(state), max_bet, "act-max-bet", need=max_total))
     if _spinning(state):
         spin_bet = _spin_bet(state)
         wager = "" if spin_bet is None or profile is None else _wager_text(state, spin_bet)
         keys.append('<button class="key key--spin is-busy" type="button" disabled aria-busy="true" '
                     f'data-part="spin">{_icon("loader-circle", "icon icon--turning")}'
                     f'<span class="key__label">Spinning</span><span class="key__sub">{wager}</span></button>')
+    elif active_act is Act.SPIN:
+        wager = "" if profile is None else _wager_text(state, bet)
+        keys.append('<button class="key key--spin is-busy" type="button" disabled aria-busy="true" '
+                    f'data-part="spin">{_icon("loader-circle", "icon icon--turning")}'
+                    f'<span class="key__label">Starting…</span><span class="key__sub">{wager}</span></button>')
     else:
         keys.append(_key(ctx, "spin", "key--spin", _icon("flame", "icon icon--dark icon--spin"), "Spin",
                          _wager_text(state, bet) if profile is not None else "", spin, "act-spin"))
-    keys.append(_key(ctx, "cash-out", "key--money key--cash", _icon("banknote-arrow-up"),
-                     "<span>Cash</span> <span>out</span>", "Whole balance", cash_out, "act-cash-out"))
+    if active_act is Act.CASH_OUT:
+        keys.append('<button class="key key--money key--cash is-busy" type="button" disabled aria-busy="true" '
+                    f'data-part="cash-out">{_icon("loader-circle", "icon icon--turning")}'
+                    '<span class="key__label"><span>Cashing</span> <span>out</span></span>'
+                    '<span class="key__sub">Waiting…</span></button>')
+    else:
+        keys.append(_key(ctx, "cash-out", "key--money key--cash", _icon("banknote-arrow-up"),
+                         "<span>Cash</span> <span>out</span>", "Whole balance", cash_out, "act-cash-out"))
     limit = "" if state.aft is None else f"Up to {_n(state.aft.limit_credits)}"
     add_label = "<span>Add</span> <span>credits</span>"
     if add is not None:
@@ -1254,7 +1400,16 @@ def _add_credits(ctx: _Ctx) -> str:
         text = f"{_n(chip)} max" if chip == limit else _n(chip)
         chips.append(f'<button class="chip{on}" type="button" data-part="amount-{chip}" '
                      f'data-amount="{chip}">{text}</button>')
+    active = _active_action(state)
+    adding = active is not None and active[0] is Act.ADD_CREDITS
     submit_text = f"Add {_e(shown)} credits"
+    if adding:
+        submit_btn = ('<button class="btn btn--ink btn--wide is-busy" type="button" disabled aria-busy="true" '
+                      f'data-part="add-credits-submit">{_icon("loader-circle", "icon icon--turning")}'
+                      'Adding credits…</button>')
+    else:
+        submit_btn = (f'<button class="btn btn--ink btn--wide" type="submit" data-part="add-credits-submit"'
+                      f'{_disabled(refusal)}>{_icon("plus", "icon icon--dark")}{submit_text}</button>')
     return (
         '<section class="tray tray--credits sheet sheet--short" id="add-credits-tray" '
         'aria-labelledby="credits-title" data-region="add-credits"><div class="tray__head"><div>'
@@ -1271,8 +1426,7 @@ def _add_credits(ctx: _Ctx) -> str:
         f'autocomplete="off" value="{_e(shown)}"{input_extra}>'
         f'<span class="amount__unit">{unit}</span></label>{error}'
         f'<div class="chips" aria-label="Quick amounts">{"".join(chips)}</div>'
-        f'<button class="btn btn--ink btn--wide" type="submit" data-part="add-credits-submit"'
-        f'{_disabled(refusal)}>{_icon("plus", "icon icon--dark")}{submit_text}</button></form></section>')
+        f'{submit_btn}</form></section>')
 
 
 def _rail_meters(ctx: _Ctx) -> str:
@@ -1339,6 +1493,7 @@ _HIDDEN_EVENTS = frozenset(("game_start",))
 _ACTION_ICONS = MappingProxyType({
     Act.ADD_CREDITS.value: "circle-plus", Act.CASH_OUT.value: "banknote-arrow-up",
     Act.ARM.value: "crosshair", Act.CANCEL_ARM.value: "crosshair", Act.SPIN.value: "rotate-cw",
+    Act.MAX_BET.value: "rotate-cw",
     Act.APPLY_PROFILE.value: "sliders-horizontal", Act.RESTORE_STOCK.value: "sliders-horizontal",
     Act.PLAY.value: "power", Act.SOUND.value: "volume-2", Act.BILLS.value: "banknote",
     Act.CLOCK_SYNC.value: "clock-3",
@@ -1356,9 +1511,9 @@ def shown(record: Mapping[str, object]) -> bool:
         return record.get("event") not in _HIDDEN_EVENTS
     if kind == "outcome":
         action, result = record.get("action"), _recorded_outcome(record)
-        if action in (Act.BET_ONE.value, Act.MAX_BET.value):
+        if action == Act.BET_ONE.value:
             return False
-        if action == Act.SPIN.value and result in GAME_OVER:
+        if action in (Act.SPIN.value, Act.MAX_BET.value) and result in GAME_OVER:
             return False  # the spin record tells the game
         if action in (Act.APPLY_PROFILE.value, Act.RESTORE_STOCK.value) and result in PROFILE_CHANGED:
             return False  # the profile record tells the change
@@ -1408,13 +1563,14 @@ def _describe_spin(record: Mapping[str, object]) -> str:
     paid = int(record.get("paid") or 0)
     name = record.get("name")
     if name:
-        result = _e(name).replace(" ", NBSP)
+        result = _e(name)
     else:
         stops = record.get("stops")
         result = _symbols_text(_centre_symbols(tuple(stops))) if isinstance(stops, (list, tuple)) else ""
     total = int(record.get("total_bet") or bet)
+    wager = _plural(total, "credit") if total > bet else _coins(bet)
     outcome = f'<span class="won">won{NBSP}{_n(paid)}</span>' if paid else f"lost{NBSP}{_n(total)}"
-    parts = [f"Spin{SEP}{_coins(bet)}"] + ([result] if result else []) + [outcome]
+    parts = [f"Spin{SEP}{wager}"] + ([result] if result else []) + [outcome]
     return SEP.join(parts)
 
 
@@ -1511,26 +1667,44 @@ def _changed_draft(ctx: _Ctx) -> sp.Profile | None:
 
 def _odds_actions(ctx: _Ctx) -> str:
     state = ctx.state
+    active = _active_action(state)
+    active_act = None if active is None else active[0]
     custom = state.profile is not None and state.profile.custom
     restore = ctx.admit(Act.RESTORE_STOCK) if custom else None
     apply = ctx.admit(Act.APPLY_PROFILE) if _changed_draft(ctx) is not None else None
     restore_off = _disabled(restore) if restore else ("" if custom else " disabled")
     apply_off = _disabled(apply) if apply else ("" if _changed_draft(ctx) is not None else " disabled")
+    busy_attr = f' data-busy="{active_act.value}"' if active_act in (Act.APPLY_PROFILE, Act.RESTORE_STOCK) else ""
+    if active_act is Act.RESTORE_STOCK:
+        restore_btn = ('<button class="btn btn--quiet is-busy" type="button" disabled aria-busy="true" '
+                       f'data-part="restore-stock">{_icon("loader-circle", "icon icon--turning")}Restoring…</button>')
+    else:
+        restore_btn = (f'<button class="btn btn--quiet" type="submit" form="act-restore-stock" '
+                       f'data-part="restore-stock"{restore_off}>{_icon("rotate-ccw")}Restore stock game</button>')
+    if active_act is Act.APPLY_PROFILE:
+        apply_btn = ('<button class="btn btn--flame is-busy" type="button" disabled aria-busy="true" '
+                     f'data-part="apply-odds">{_icon("loader-circle", "icon icon--turning")}'
+                     'Applying…</button>')
+    else:
+        apply_btn = (f'<button class="btn btn--flame" type="submit" form="odds-editor" data-part="apply-odds"'
+                     f'{apply_off}>{_icon("upload", "icon icon--dark")}Apply to machine</button>')
     return (
-        '<div class="tool-head__actions" data-region="odds-actions" data-draft>'
-        f'<button class="btn btn--quiet" type="submit" form="act-restore-stock" data-part="restore-stock"'
-        f'{restore_off}>{_icon("rotate-ccw")}Restore stock game</button>'
+        f'<div class="tool-head__actions" data-region="odds-actions" data-draft{busy_attr}>'
+        f'{restore_btn}'
         '<noscript><button class="btn btn--quiet" type="submit" form="odds-editor" formmethod="get" '
         f'formaction="/odds" data-part="preview-odds">{_icon("refresh-cw")}Preview</button></noscript>'
-        f'<button class="btn btn--flame" type="submit" form="odds-editor" data-part="apply-odds"{apply_off}>'
-        f'{_icon("upload", "icon icon--dark")}Apply to machine</button>'
+        f'{apply_btn}'
         f'{ctx.form(Act.RESTORE_STOCK, "act-restore-stock")}</div>')
 
 
 def _notice(tone: str, text: str, attrs: str = "") -> str:
-    mark = (f'<span class="dot dot--{tone}"></span>' if tone == "warn"
-            else _icon("circle-alert" if tone == "danger" else "circle-check"))
-    cls = "notice notice--warn" if tone == "danger" else f"notice notice--{tone}"
+    if tone == "busy":
+        mark = _icon("loader-circle", "icon icon--turning")
+        cls = "notice notice--quiet"
+    else:
+        mark = (f'<span class="dot dot--{tone}"></span>' if tone == "warn"
+                else _icon("circle-alert" if tone == "danger" else "circle-check"))
+        cls = "notice notice--warn" if tone == "danger" else f"notice notice--{tone}"
     return (f'<div class="{cls}" id="odds-status" data-region="odds-status" data-draft data-tone="{tone}"'
             f'{attrs}>{mark}<p class="notice__text">{text}</p></div>')
 
@@ -1542,6 +1716,14 @@ def _odds_status(ctx: _Ctx) -> str:
         return _notice("warn", "<strong>Checking what happened</strong>"
                        f"{SEP}{_e(state.checking[Family.EXTENSION].reason)}.{_fault_text(fault)} "
                        "Odds changes wait until it is settled.", _fault_attr(fault))
+    active = _active_action(state)
+    active_act = None if active is None else active[0]
+    if active_act is Act.APPLY_PROFILE:
+        return _notice("busy", "<strong>Applying to the machine…</strong> Sending the new odds and reading them "
+                       "back to check.", ' data-busy="apply-profile"')
+    if active_act is Act.RESTORE_STOCK:
+        return _notice("busy", "<strong>Restoring the stock game…</strong> Waiting for the machine to confirm.",
+                       ' data-busy="restore-stock"')
     draft = ctx.draft()
     changed = _changed_draft(ctx)
     if draft is not None and draft.problem is not None:
@@ -1642,6 +1824,8 @@ def _diff_text(old: sp.Profile, new: sp.Profile, word: str) -> str:
         if before.award != after.award:
             name = ws.outcome_name(before.symbols, before.symbols, Kind.WIN)
             changes.append(f"{name} at {_bets(before)} award {before.award:,} → {after.award:,}")
+    if old.lines == new.lines and any(b.line_mask != a.line_mask for b, a in zip(old.payouts, new.payouts)):
+        changes.append("payline masks updated")
     if not changes:
         return "no differences" if word == "was" else "the same as stock"
     shown = changes[:DIFF_LIST]
@@ -1850,7 +2034,10 @@ def _limits(ctx: _Ctx, base: sp.Profile, values: Mapping[str, str]) -> str:
     bet = base.max_bet_per_line  # fixed: shown, never edited
     total = _max_total(lines, bet)
     return ('<section class="panel" aria-labelledby="limits-title"><div class="panel__head">'
-            '<h2 class="panel__title" id="limits-title">Paylines &amp; bet limits</h2></div><div class="fields">'
+            '<h2 class="panel__title" id="limits-title">Paylines &amp; bet limits</h2></div>'
+            '<p class="panel__about">Line 1 is center; 2–3 add top and bottom; 4–5 add both diagonals. '
+            'Non-progressive payouts pay on every active line; 3-coin progressive sevens stay on the center '
+            'line.</p><div class="fields">'
             f'<label class="field"><span class="field__label">Paylines<span class="field__hint">up to {max_lines}'
             f'</span></span><input class="field__input" form="odds-editor" name="{F_LINES}" inputmode="numeric" '
             f'autocomplete="off" value="{_e(lines)}" data-base="{base.lines}"></label>'
@@ -1975,13 +2162,16 @@ def _settings_main(ctx: _Ctx, built: Mapping[str, str]) -> str:
 
 def _settings(ctx: _Ctx) -> str:
     state = ctx.state
-    running = None if state.in_progress is None else state.in_progress.name
+    active = _active_action(state)
+    running = None if active is None else active[0]
     rows = [
         _switch_row(ctx, "play", "power", "Play",
                     "When off, nobody can play at the machine or from this page, and top-ups are refused.",
                     Act.PLAY, Setting.ON if state.play_enabled else Setting.OFF,
                     ("Enabled", "Off"), running is Act.PLAY),
-        _switch_row(ctx, "sound", "volume-2", "Sound", "Reel, button and win sounds at the machine.",
+        _switch_row(ctx, "sound", "volume-2", "Sound",
+                    "Reel, button and win sounds at the machine (muting the external sound board requires the "
+                    "updated firmware image).",
                     Act.SOUND, state.settings.sound, ("On", "Off"), running is Act.SOUND),
         _switch_row(ctx, "bills", "banknote", "Bill acceptor", "Lets the machine take paper bills as credits.",
                     Act.BILLS, state.settings.bills, ("All bills accepted", "Off"), running is Act.BILLS),
@@ -1999,8 +2189,13 @@ def _switch_row(ctx: _Ctx, key: str, icon: str, label: str, desc: str, act: Act,
     form_id = f"act-{act.value}"
     extra_desc = ""
     if saving:
-        target = ctx.state.in_progress.params.get(F_ON)
-        doing = "Turning on…" if target else "Turning off…"
+        in_prog = ctx.state.in_progress
+        if in_prog is not None and in_prog.name is act:
+            target = bool(in_prog.params.get(F_ON))
+            doing = "Turning on…" if target else "Turning off…"
+        else:
+            target = value is not Setting.ON
+            doing = "Sending…"
         control = (f'<span class="setting__state setting__state--pending">'
                    f'{_icon("loader-circle", "icon icon--s icon--turning")}{doing}</span>'
                    f'<button class="switch is-pending" type="button" aria-pressed="{"true" if target else "false"}" '

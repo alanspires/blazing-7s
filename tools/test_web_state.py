@@ -116,16 +116,18 @@ class AdmitTest(unittest.TestCase):
         state = online(credits=profile.max_bet_per_line * profile.lines - 1)
         self.assertEqual(ws.chosen_bet(state), profile.max_bet_per_line)
         self.assertEqual(code(state, Act.SPIN), Code.CREDITS)
+        self.assertEqual(code(state, Act.MAX_BET), Code.CREDITS)
         self.assertIsNone(code(state, Act.BET_ONE))
-        self.assertIsNone(code(state, Act.MAX_BET))
         smaller = replace(state, bet_per_line=ws.next_bet(state, Act.BET_ONE))
         self.assertEqual(ws.chosen_bet(smaller), 1)
         self.assertIsNone(code(smaller, Act.SPIN))
+        self.assertEqual(code(smaller, Act.MAX_BET), Code.CREDITS)
         self.assertEqual(ws.next_bet(smaller, Act.MAX_BET), profile.max_bet_per_line)
 
-    def test_no_credits_blocks_spin_and_cash_out_but_not_bet_selection(self):
+    def test_no_credits_blocks_spin_max_bet_and_cash_out_but_not_bet_selection(self):
         state = online(credits=0)
         self.assertEqual(code(state, Act.SPIN), Code.NO_CREDITS)
+        self.assertEqual(code(state, Act.MAX_BET), Code.NO_CREDITS)
         self.assertEqual(code(state, Act.CASH_OUT), Code.NO_CREDITS)
         self.assertIsNone(code(state, Act.BET_ONE))
         self.assertIsNone(code(state, Act.ADD_CREDITS, amount=10))
@@ -136,9 +138,12 @@ class AdmitTest(unittest.TestCase):
         short = online(profile, credits=wager - 1)
         self.assertEqual(ws.total_wager(short), wager)
         self.assertEqual(code(short, Act.SPIN), Code.CREDITS)
+        self.assertEqual(code(short, Act.MAX_BET), Code.CREDITS)
         self.assertIsNone(code(online(profile, credits=wager), Act.SPIN))
+        self.assertIsNone(code(online(profile, credits=wager), Act.MAX_BET))
         lower = replace(short, bet_per_line=profile.max_bet_per_line - 1)
         self.assertIsNone(code(lower, Act.SPIN))
+        self.assertEqual(code(lower, Act.MAX_BET), Code.CREDITS)
 
     def test_spin_needs_capability_play_and_no_action_in_progress(self):
         no_spin = online(ext_info=info(ALL_CAPABILITIES & ~se.Capability.SPIN))
@@ -346,6 +351,48 @@ class CatalogueTest(unittest.TestCase):
 
     def test_no_profile_no_catalogue(self):
         self.assertEqual(ws.catalogue(replace(online(), profile=None)), [])
+
+    def test_winning_name_lists_every_winning_line_on_multi_line_profiles(self):
+        stock = sp.stock_profile()
+        three = replace(stock, lines=3, payouts=tuple(
+            p if p.flags in sp.PROGRESSIVE_FLAGS else replace(p, line_mask=0b111) for p in stock.payouts))
+        # Find stops that win on two different lines with different combos, and two lines with the same combo.
+        diff_stops = same_stops = None
+        for s0 in range(sp.STOPS):
+            for s1 in range(sp.STOPS):
+                for s2 in range(sp.STOPS):
+                    stops = (s0, s1, s2)
+                    score = sp.score(three, stops, 3)
+                    wins = [(i, r) for i, (r, a) in enumerate(score.lines) if a]
+                    if len(wins) == 2:
+                        if wins[0][1] != wins[1][1] and diff_stops is None:
+                            diff_stops = (stops, wins)
+                        elif wins[0][1] == wins[1][1] and same_stops is None:
+                            same_stops = (stops, wins)
+                    if diff_stops and same_stops:
+                        break
+                if diff_stops and same_stops:
+                    break
+            if diff_stops and same_stops:
+                break
+        self.assertIsNotNone(diff_stops)
+        self.assertIsNotNone(same_stops)
+
+        stops, wins = diff_stops
+        name = ws.winning_name(three, stops, 3)
+        self.assertIn(f"(line {wins[0][0] + 1})", name)
+        self.assertIn(f"(line {wins[1][0] + 1})", name)
+        self.assertIn(" + ", name)
+
+        stops, wins = same_stops
+        same_name = ws.winning_name(three, stops, 3)
+        self.assertIn(f"(lines {wins[0][0] + 1}, {wins[1][0] + 1})", same_name)
+
+        # Single-line profiles keep the bare combination name with no line suffix.
+        top_stops = ws.find_outcome(ws.catalogue(online()), "0").stops
+        single = ws.winning_name(stock, top_stops, stock.max_bet_per_line)
+        self.assertIsNotNone(single)
+        self.assertNotIn("line", single)
 
 
 if __name__ == "__main__":

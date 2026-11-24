@@ -22,6 +22,8 @@
 #define FW_REELS 3u
 #define FW_INFO_SIZE 23u
 #define FW_STATUS_SIZE 20u
+#define FW_OPTIONS_BASE 0x43e800u
+#define FW_OPTIONS_SIZE 232u
 
 #define FW_PROFILE_BASE 0x430000u
 #define FW_SLOT_SIZE 512u
@@ -54,14 +56,18 @@
 #define FW_CAP_SPIN 0x04u
 #define FW_CAP_POSITION 0x08u
 #define FW_CAP_JOG 0x10u
+#define FW_CAP_OPTIONS 0x20u
+#define FW_CAP_SET_OPTION 0x40u
 
 #define FW_OP_INFO 0u
 #define FW_OP_STATUS 1u
 #define FW_OP_READ_PROFILE 2u
+#define FW_OP_READ_OPTIONS 3u
 #define FW_OP_BEGIN_PROFILE 16u
 #define FW_OP_PROFILE_CHUNK 17u
 #define FW_OP_COMMIT_PROFILE 18u
 #define FW_OP_RESTORE_STOCK 19u
+#define FW_OP_SET_OPTION 20u
 #define FW_OP_ARM_OUTCOME 32u
 #define FW_OP_CANCEL_OUTCOME 33u
 #define FW_OP_BET_SPIN 34u
@@ -126,6 +132,8 @@ uint8_t fw_current_status(uint64_t id);
 /* INFO LE payload: capabilities:u32, next_id:u64, profile_size:u16,
  * max_chunk:u8, max_lines:u8, max_bet:u8, max_total_bet:u8, stops:u8, max_award:u32.
  * STATUS LE payload: last_id:u64, last_op:u8, last_status:u8, active:u8,
- * generation:u32, profile_crc:u32, fault:u8. READ_PROFILE returns raw bytes. */
+ * generation:u32, profile_crc:u32, fault:u8. READ_PROFILE returns raw bytes.
+ * READ_OPTIONS returns raw SafeRAM option bytes [FW_OPTIONS_BASE, +FW_OPTIONS_SIZE).
+ * SET_OPTION payload: offset:u8, length:u8 (1..4), raw_bytes[length] (allowlisted). */
 
 #endif

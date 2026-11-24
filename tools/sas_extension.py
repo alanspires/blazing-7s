@@ -52,6 +52,7 @@ VERSION = 1
 REQUEST_HEADER = len(MAGIC) + 2 + 8  # magic, version, op, id
 REPLY_HEADER = REQUEST_HEADER + 1  # and status
 MAX_PAYLOAD = 64
+OPTIONS_SIZE = 232  # SafeRAM [0x43E800, 0x43E8E8); matches firmware/src/fw.h FW_OPTIONS_SIZE
 CHUNK_OFFSET = struct.Struct("<H")  # PROFILE_CHUNK payload: offset, then the bytes
 READ_REQUEST = struct.Struct("<HB")  # READ_PROFILE payload: offset, count
 BEGIN_REQUEST = struct.Struct("<HI")  # BEGIN_PROFILE payload: total length, CRC-32
@@ -71,10 +72,12 @@ class Op(enum.IntEnum):
     INFO = 0
     STATUS = 1
     READ_PROFILE = 2
+    READ_OPTIONS = 3
     BEGIN_PROFILE = 16
     PROFILE_CHUNK = 17
     COMMIT_PROFILE = 18
     RESTORE_STOCK = 19
+    SET_OPTION = 20
     ARM_OUTCOME = 32
     CANCEL_OUTCOME = 33
     BET_SPIN = 34
@@ -82,7 +85,7 @@ class Op(enum.IntEnum):
     JOG = 36
 
 
-QUERIES = frozenset((Op.INFO, Op.STATUS, Op.READ_PROFILE))
+QUERIES = frozenset((Op.INFO, Op.STATUS, Op.READ_PROFILE, Op.READ_OPTIONS))
 
 
 class Status(enum.IntEnum):
@@ -105,11 +108,14 @@ class Capability(enum.IntFlag):
     SPIN = 0x04
     POSITION = 0x08
     JOG = 0x10
+    OPTIONS = 0x20
+    SET_OPTION = 0x40
 
 
 REQUIRES = {
     Op.BEGIN_PROFILE: Capability.PROFILE, Op.PROFILE_CHUNK: Capability.PROFILE,
     Op.COMMIT_PROFILE: Capability.PROFILE, Op.RESTORE_STOCK: Capability.PROFILE,
+    Op.SET_OPTION: Capability.SET_OPTION,
     Op.ARM_OUTCOME: Capability.OUTCOME, Op.CANCEL_OUTCOME: Capability.OUTCOME,
     Op.BET_SPIN: Capability.SPIN, Op.POSITION: Capability.POSITION, Op.JOG: Capability.JOG,
 }
@@ -248,6 +254,14 @@ class Extension:
             data += self._query(Op.READ_PROFILE, READ_REQUEST.pack(len(data), count), count)
         return bytes(data)
 
+    def read_options(self, size: int = OPTIONS_SIZE) -> bytes:
+        """The SafeRAM setup-options block `[0x43E800, +size)`, in reads of at most MAX_PAYLOAD."""
+        data = bytearray()
+        while len(data) < size:
+            count = min(MAX_PAYLOAD, size - len(data))
+            data += self._query(Op.READ_OPTIONS, READ_REQUEST.pack(len(data), count), count)
+        return bytes(data)
+
     def mutate(self, op: Op, id: int, payload: bytes = b"", *, record: Record) -> Status:
         """Send a mutation exactly once, after `record` has its op name, ID and exact request
         bytes. Once its bytes may have reached the line, anything but a valid reply is
@@ -288,6 +302,30 @@ def info(ext: Extension) -> dict:
 
 def status(ext: Extension) -> dict:
     return ext.status().report()
+
+
+def read_options(ext: Extension, machine_info: Info | None = None) -> bytes | None:
+    """Raw S6000 SafeRAM options block when the firmware advertises Capability.OPTIONS, else None."""
+    current = ext.info() if machine_info is None else machine_info
+    if not current.capabilities & Capability.OPTIONS:
+        return None
+    return ext.read_options(OPTIONS_SIZE)
+
+
+def set_option(ext: Extension, payload: bytes, explicit_id: int | None = None, *, record: Record) -> dict:
+    """Write one allowlisted S6000 setup option via FW_OP_SET_OPTION and verify readback."""
+    if len(payload) < 3 or len(payload) > 6 or payload[1] + 2 != len(payload):
+        raise ValueError(f"invalid SET_OPTION payload: {payload.hex(' ')}")
+    info = ext.info()
+    _require(info, Op.SET_OPTION)
+    id = _id_for(ext, info, Op.SET_OPTION, explicit_id)
+    _expect(ext, Op.SET_OPTION, id, payload, record=record)
+    options_raw = read_options(ext, info)
+    if options_raw is not None:
+        offset, count = payload[0], payload[1]
+        if options_raw[offset:offset + count] != payload[2:]:
+            raise VerifyFailed(f"SET_OPTION id {id} answered OK, but read-back at 0x{offset:02X} differs")
+    return {"id": id, "status": Status.OK.name, "options_raw": options_raw}
 
 
 def download(ext: Extension) -> tuple[sp.Profile, MachineStatus]:

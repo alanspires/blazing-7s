@@ -74,6 +74,7 @@ uint32_t game_repeat_wager(uint32_t counter);   /* 0x4324e, replaces JSR 0x549c8
 void game_evaluate_wager(void);                 /* 0x65168, replaces JSR 0x35fdc */
 uint32_t game_line_wager(uint32_t total);
 uint32_t game_bet_one(void);
+void game_bet_one_pulse(void);                  /* 0x4309a, replaces JSR 0x396e2 */
 uint32_t game_start_permitted(void);
 uint32_t game_candidate(uint32_t reel, uint32_t caller);
 void game_commit(void);

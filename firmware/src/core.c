@@ -365,7 +365,7 @@ static int action(uint8_t op)
 
 static int mutation(uint8_t op)
 {
-    return (op >= FW_OP_BEGIN_PROFILE && op <= FW_OP_RESTORE_STOCK) || action(op);
+    return (op >= FW_OP_BEGIN_PROFILE && op <= FW_OP_SET_OPTION) || action(op);
 }
 
 /* The committed slot a profile record names, or NULL if it is not exactly the
@@ -618,10 +618,94 @@ static uint8_t restore_stock(void)
     return apply_profile(source, true);
 }
 
+enum { OPT_U8 = 0u, OPT_BCD = 1u, OPT_ASCII_DIGITS = 2u };
+
+struct option_rule {
+    uint8_t offset;
+    uint8_t len;
+    uint8_t kind;
+    uint32_t min;
+    uint32_t max;
+};
+
+/* Allowlist of safe S6000 SafeRAM setup options (ROM table 0x73BB8, base 0x43E800).
+ * Host/SAS link options (98, 99, 78Hi, 17, 92, 23), DIP-driven denomination (10),
+ * bet mode (27), and cabinet IDs (19, 50) stay read-only so remote edits cannot
+ * sever serial control. */
+static const struct option_rule option_rules[] = {
+    {0x05u, 1u, OPT_U8, 0u, 8u},          /* 02 Progressive type */
+    {0x06u, 1u, OPT_U8, 0u, 4u},          /* 07 External jackpots */
+    {0x24u, 4u, OPT_ASCII_DIGITS, 0u, 0u},/* 78Lo S/MPI progressive machine ID */
+    {0x07u, 1u, OPT_U8, 0u, 4u},          /* 18 Jackpot 4 signal */
+    {0x3cu, 2u, OPT_BCD, 0u, 255u},       /* 06 SAS progressive group ID */
+    {0x1eu, 2u, OPT_BCD, 0u, 9999u},      /* 63 Reset progressive amount */
+    {0x01u, 1u, OPT_U8, 0u, 5u},          /* 26 Rebet / autospin */
+    {0x02u, 1u, OPT_U8, 0u, 6u},          /* 09 Jackpot bell */
+    {0x04u, 1u, OPT_U8, 0u, 1u},          /* 11 Change coin / credit */
+    {0x9cu, 1u, OPT_U8, 0u, 1u},          /* 08 Credit snap */
+    {0x2au, 3u, OPT_BCD, 0u, 99999u},     /* 51 Credit top limit */
+    {0x18u, 3u, OPT_BCD, 0u, 99999u},     /* 56 Credit collect lockup */
+    {0x36u, 3u, OPT_BCD, 0u, 99999u},     /* 58 Win lockup */
+    {0x3eu, 3u, OPT_BCD, 0u, 99999u},     /* 57 SAS lockup */
+    {0x42u, 3u, OPT_BCD, 0u, 99999u},     /* 12 Win lockup credit release */
+    {0x16u, 2u, OPT_BCD, 0u, 9999u},      /* 54 Coin hopper pay amount */
+    {0x28u, 1u, OPT_U8, 0u, 4u},          /* 04 Even handpay (collect) */
+    {0x9du, 1u, OPT_U8, 0u, 4u},          /* 05 Even handpay (win) */
+    {0x2fu, 1u, OPT_U8, 0u, 1u},          /* 15 Residual credits */
+    {0x9eu, 1u, OPT_U8, 0u, 1u},          /* 20 Extra coin */
+    {0x0au, 1u, OPT_U8, 0u, 1u},          /* 47 Attract feature */
+    {0x0bu, 1u, OPT_U8, 0u, 1u},          /* 38 Reel stop sound */
+    {0x0cu, 1u, OPT_U8, 0u, 7u},          /* 48 Tower configuration */
+    {0x9fu, 1u, OPT_U8, 0u, 1u},          /* 66 PRD reel-stop sound */
+    {0xa0u, 1u, OPT_U8, 0u, 1u},          /* 68 Game sounds */
+    {0x08u, 1u, OPT_U8, 0u, 1u},          /* 80 Test 2 & 10 enable */
+    {0x4bu, 1u, OPT_U8, 1u, 3u},          /* 61 Payment device */
+    {0x49u, 1u, OPT_U8, 0u, 3u},          /* 73 Voucher validation level */
+    {0x4au, 1u, OPT_U8, 0u, 1u},          /* 76 Voucher receipts */
+    {0x4du, 1u, OPT_U8, 0u, 255u},        /* 74 Voucher expiration */
+    {0x4eu, 2u, OPT_BCD, 0u, 9999u},      /* 64 Minimum voucher pay */
+    {0x50u, 3u, OPT_BCD, 0u, 99999u},     /* 67 Maximum voucher pay */
+    {0x53u, 1u, OPT_U8, 0u, 10u},         /* 14 Even voucher pay */
+    {0x48u, 1u, OPT_U8, 0u, 1u},          /* 95 Voucher denom mismatch */
+    {0x4cu, 1u, OPT_U8, 0u, 1u},          /* 81 Coin acceptor enable */
+};
+
+static int valid_option_write(const uint8_t *p, uint32_t length)
+{
+    uint32_t i, j, value = 0;
+    if (length < 3u || length > 6u || (uint32_t)p[1] + 2u != length)
+        return 0;
+    for (i = 0; i < sizeof(option_rules) / sizeof(option_rules[0]); ++i) {
+        const struct option_rule *r = &option_rules[i];
+        if (r->offset != p[0] || r->len != p[1])
+            continue;
+        if (r->kind == OPT_U8) {
+            value = p[2];
+            return value >= r->min && value <= r->max;
+        }
+        if (r->kind == OPT_BCD) {
+            for (j = 0; j < r->len; ++j) {
+                uint8_t hi = (uint8_t)(p[2u + j] >> 4), lo = (uint8_t)(p[2u + j] & 0x0fu);
+                if (hi > 9u || lo > 9u)
+                    return 0;
+                value = value * 100u + (uint32_t)hi * 10u + (uint32_t)lo;
+            }
+            return value >= r->min && value <= r->max;
+        }
+        for (j = 0; j < r->len; ++j)
+            if (p[2u + j] < (uint8_t)'0' || p[2u + j] > (uint8_t)'9')
+                return 0;
+        return 1;
+    }
+    return 0;
+}
+
 static uint32_t capability(uint8_t op)
 {
     if (op >= FW_OP_BEGIN_PROFILE && op <= FW_OP_RESTORE_STOCK)
         return FW_CAP_PROFILE;
+    if (op == FW_OP_SET_OPTION)
+        return FW_CAP_SET_OPTION;
     if (op == FW_OP_ARM_OUTCOME || op == FW_OP_CANCEL_OUTCOME)
         return FW_CAP_OUTCOME;
     if (op == FW_OP_BET_SPIN)
@@ -665,6 +749,10 @@ static uint8_t execute(uint8_t op, const uint8_t *p, uint32_t length)
         return length == 0u ? commit_profile() : FW_BAD_REQUEST;
     case FW_OP_RESTORE_STOCK:
         return length == 0u ? restore_stock() : FW_BAD_REQUEST;
+    case FW_OP_SET_OPTION:
+        if (!valid_option_write(p, length))
+            return FW_BAD_REQUEST;
+        break;
     case FW_OP_CANCEL_OUTCOME:
         if (length != 0u)
             return FW_BAD_REQUEST;
@@ -806,6 +894,24 @@ uint32_t fw_process(const uint8_t *data, uint32_t length, uint8_t *reply,
             } else {
                 size = count;
                 copy(payload, state.active + offset, size);
+            }
+        }
+    } else if (op == FW_OP_READ_OPTIONS) {
+        if ((fw_capabilities() & FW_CAP_OPTIONS) == 0u) {
+            status = FW_UNSUPPORTED;
+        } else if (length != FW_REQUEST_HEADER + 3u) {
+            status = FW_BAD_REQUEST;
+        } else {
+            uint32_t offset = get16(data + FW_REQUEST_HEADER);
+            count = data[FW_REQUEST_HEADER + 2u];
+            if (count == 0u || count > FW_MAX_PAYLOAD || offset >= FW_OPTIONS_SIZE ||
+                count > FW_OPTIONS_SIZE - offset) {
+                status = FW_BAD_REQUEST;
+            } else if (capacity < FW_REPLY_HEADER + count) {
+                return 0;
+            } else {
+                size = count;
+                copy(payload, mapped(FW_OPTIONS_BASE + offset), size);
             }
         }
     } else {

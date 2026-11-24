@@ -58,6 +58,7 @@ from types import MappingProxyType
 
 import sas_extension as se
 import sas_machine as sm
+import sas_options as so
 import sas_profile as sp
 import sas_protocol as sas
 import web_state as ws
@@ -93,6 +94,7 @@ QUEUE_LIMIT = 4
 LOG_LIMIT = 20
 
 POWER_APPLIED, POWER_LOST = 0x17, 0x18
+OPTIONS_CHANGED = 0x3C  # Table A-1: operator changed options
 GAME_STARTED, GAME_ENDED = 0x7E, 0x7F
 DISTURBING = range(0x11, 0x1F)  # Table A-1 doors, power and cashbox: an upload stops
 DOOR_OPENED = (0x11, 0x13, 0x15, 0x19, 0x1D)  # each door's close code is one more
@@ -105,13 +107,13 @@ MONEY_EVENTS = frozenset((0x51, 0x52, 0x66, 0x69))  # credits or meters may have
 
 MONEY_OPS = frozenset((sm.OP_DEPOSIT, sm.OP_CASH_OUT))
 EXTENSION_OPS = frozenset(op.name for op in (se.Op.BET_SPIN, se.Op.ARM_OUTCOME, se.Op.CANCEL_OUTCOME,
-                                             se.Op.RESTORE_STOCK))
+                                             se.Op.RESTORE_STOCK, se.Op.SET_OPTION))
 OP_ACTS = MappingProxyType({
     sm.OP_DEPOSIT: Act.ADD_CREDITS, sm.OP_CASH_OUT: Act.CASH_OUT, sm.OP_SET_PLAY: Act.PLAY,
     sm.OP_SET_SOUND: Act.SOUND, sm.OP_SET_BILLS: Act.BILLS, sm.OP_SET_CLOCK: Act.CLOCK_SYNC,
     se.UPLOAD_OP: Act.APPLY_PROFILE,
-    se.Op.RESTORE_STOCK.name: Act.RESTORE_STOCK, se.Op.BET_SPIN.name: Act.SPIN,
-    se.Op.ARM_OUTCOME.name: Act.ARM, se.Op.CANCEL_OUTCOME.name: Act.CANCEL_ARM,
+    se.Op.RESTORE_STOCK.name: Act.RESTORE_STOCK, se.Op.SET_OPTION.name: Act.SET_OPTION,
+    se.Op.BET_SPIN.name: Act.SPIN, se.Op.ARM_OUTCOME.name: Act.ARM, se.Op.CANCEL_OUTCOME.name: Act.CANCEL_ARM,
 })
 BET_ACTS = frozenset((Act.BET_ONE,))
 
@@ -561,10 +563,14 @@ class Worker:
             event.update(event="door_open" if is_open else "door_closed", door=door)
             if self._state.arm.state is ArmState.ARMED:
                 self._needs.add("status")  # a door can clear an arm: STATUS says before it is shown
+            if not is_open:
+                self._needs.add("options")  # setup options may have been changed while the door was open
         elif code in EVENT_NAMES:
             event["event"] = EVENT_NAMES[code]
         else:
             event.update(event="exception", name=EXCEPTIONS.get(code, "Unknown exception"))
+        if code == OPTIONS_CHANGED:
+            self._needs.add("options")
         if code == POWER_APPLIED:
             self._need_recovery()
             self._update(fresh=False, doors=None, game_running=False)
@@ -593,6 +599,7 @@ class Worker:
         cpc = reading.cents_per_credit
         self._update(cents_per_credit=cpc, play_enabled=reading.play_enabled,
                      aft=_aft(reading.aft, cpc), last_reply_time=_utc_now(),
+                     options=_machine_options(reading.info, reading.features, reading.options_raw),
                      settings=replace(self._state.settings, clock_offset=_clock_offset(reading.machine_time)))
         self._sync_meters(reading.credits, reading.meters, reading.money_meters)
         for entry in list(self._open.values()):
@@ -635,6 +642,12 @@ class Worker:
                     self._update(aft=_aft(self._read(sm.aft_lock), self._state.cents_per_credit))
             if needs & {"game", "status"}:
                 self._apply_status(self._ext.status())
+            if "options" in needs:
+                info = self._read(sm.game_info)
+                features = self._read(sm.enabled_features)
+                options_raw = (se.read_options(self._ext, self._state.ext_info)
+                               if self._state.ext_info is not None else None)
+                self._update(options=_machine_options(info, features, options_raw))
         except _READ_ERRORS:
             self._needs |= needs
             self._stale()
@@ -879,6 +892,19 @@ class Worker:
             reply = se.restore(self._ext, record=self._recorder(action))
             self._profile_verified(self._open[self._current], OutcomeWord.RESTORED, reply["generation"],
                                    False, sp.stock_profile())
+        elif name is Act.SET_OPTION:
+            code = str(action.params["option"])
+            value = str(action.params["value"])
+            payload = so.encode_option_write(code, value)
+            reply = se.set_option(self._ext, payload,
+                                  record=self._recorder(action, {"option_code": code, "option_value": value}))
+            self._after_mutation(reply, se.Op.SET_OPTION)
+            if reply["options_raw"] is not None:
+                self._update(options=_machine_options(None, None, reply["options_raw"]))
+            else:
+                self._needs.add("options")
+            self._close(self._open[self._current], OutcomeWord.CONFIRMED,
+                        {"option_code": code, "option_value": value})
         elif name is Act.PLAY:
             result = sm.set_play(self._host, bool(action.params["on"]), record=self._recorder(action),
                                  pace=self._pace)
@@ -1213,6 +1239,11 @@ class Worker:
             self._set_arm(fields["arm"])
         elif op == se.Op.RESTORE_STOCK:
             self._profile_status = None  # interrupted, fault or nothing changed: read what is active
+        elif op == se.Op.SET_OPTION:
+            self._needs.add("options")
+            if "option_code" in entry.record:
+                fields["option_code"] = entry.record["option_code"]
+                fields["option_value"] = entry.record.get("option_value")
         self._close(entry, OutcomeWord(found.result), fields)
 
     def _inconsistent(self, entry: _Open) -> None:
@@ -1332,6 +1363,15 @@ def _meters(game: dict, money: dict) -> ws.Meters:
                      slot_door_opened=game["slot_door_opened"], power_reset=game["power_reset"],
                      in_house_in_cents=money["in_cents"], in_house_in_count=money["in_count"],
                      in_house_out_cents=money["out_cents"], in_house_out_count=money["out_count"])
+
+
+def _machine_options(info: dict | None, features: dict | None,
+                     options_raw: bytes | None) -> ws.MachineOptions | None:
+    if options_raw is not None:
+        return ws.MachineOptions("firmware", so.decode_setup_options(options_raw))
+    if info is not None or features is not None:
+        return ws.MachineOptions("sas", so.decode_sas_summary(info, features))
+    return None
 
 
 def _deltas(deltas: dict) -> dict:

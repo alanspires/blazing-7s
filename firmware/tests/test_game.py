@@ -69,12 +69,15 @@ FAKE_LEAVES = (
     ("fake-delay", 0x03A1E, "222f0004700c", "test_delay"),
     ("fake-accounting-action", 0x53DD0, "4e5600002f02", "test_action"),
     ("fake-queue-post", 0x03B84, "4e56fffc48e7", "test_queue_post"),
+    ("fake-pulse-one", 0x396E2, "48e720204878", "test_pulse_one"),
+    ("fake-pulse-multi", 0x3976C, "48e73020262f", "test_pulse_multi"),
 )
 
 TEST_ENV = 0x435000
 FIELDS = ("wager", "credits", "repeat", "bets", "locks", "unlocks", "depth", "delays",
           "event_count", "event", "motion_busy", "prepare_in_read", "prepare_status",
-          "first_wagers", "wager_at_first", "interleave", "interleaved")
+          "first_wagers", "wager_at_first", "interleave", "interleaved",
+          "pulse_one", "pulse_multi_calls", "pulse_multi_coins", "spl_coins")
 STUBS = r"""
 #include "fw.h"
 #include "game.h"
@@ -83,6 +86,7 @@ struct test_env {
     uint32_t wager, credits, repeat, bets, locks, unlocks, depth, delays;
     uint32_t event_count, event, motion_busy, prepare_in_read, prepare_status;
     uint32_t first_wagers, wager_at_first, interleave, interleaved;
+    uint32_t pulse_one, pulse_multi_calls, pulse_multi_coins, spl_coins;
 };
 extern struct test_env test_env;
 void motion_init(void) {}
@@ -122,11 +126,17 @@ void test_lock(void) { ++test_env.locks; ++test_env.depth; }
 void test_unlock(void) { ++test_env.unlocks; if (test_env.depth != 0u) --test_env.depth; }
 void test_delay(uint32_t ticks) { test_env.delays += ticks; }
 void test_action(uint32_t id, uint32_t value) {
-    (void)value;
     if ((id & 0xffffu) == 0x46u) {  /* issued by first-wager initialization 0x420f8 */
         ++test_env.first_wagers;
         test_env.wager_at_first = test_env.wager;
+    } else if ((id & 0xffffu) == 0x52u) {  /* SPL progressive coin-in counter 0x99 */
+        test_env.spl_coins += value;
     }
+}
+void test_pulse_one(void) { ++test_env.pulse_one; }
+void test_pulse_multi(uint32_t coins) {
+    ++test_env.pulse_multi_calls;
+    test_env.pulse_multi_coins += coins;
 }
 void test_queue_post(uint32_t queue, uint32_t event, uint16_t *status) {
     (void)queue; (void)event; (void)status;
@@ -767,6 +777,30 @@ def test_single_line_profile_keeps_the_native_first_wager_path(machine):
     assert machine.commit(profile(lines=1)) == c("OK")
     assert machine.bet_one() == 2
     assert (machine.read_env("first_wagers"), machine.read_env("wager_at_first")) == (1, 1)
+
+
+def test_bet_one_pulses_all_wagered_credits_for_multiline_progressive(machine):
+    # Stock uses native 0x396e2 (1 pulse)
+    assert machine.bet_one() == 2
+    machine.run(0x43080, 0x430A0)
+    assert (machine.read_env("pulse_one"), machine.read_env("pulse_multi_calls")) == (1, 0)
+
+    # Custom 3-line profile pulses all 3 credits via 0x3976c(3) and tops up SPL counter 0x99
+    machine.env(wager=0, pulse_one=0, pulse_multi_calls=0, pulse_multi_coins=0, spl_coins=0)
+    assert machine.commit(profile(lines=3)) == c("OK")
+    machine.cpu.write_u8(0x41001F, 1)  # SPL mode active
+    assert machine.bet_one() == 2
+    machine.run(0x43080, 0x430A0)
+    assert machine.read_env("pulse_one") == 0
+    assert (machine.read_env("pulse_multi_calls"), machine.read_env("pulse_multi_coins")) == (1, 3)
+    assert machine.read_env("spl_coins") == 3  # 1 from 0x4308a + 2 from game_bet_one_pulse
+
+    # Coin-topped remainder (wager 4 -> +2 to reach 6) pulses exactly 2 credits
+    machine.env(wager=4, pulse_multi_calls=0, pulse_multi_coins=0, spl_coins=0)
+    assert machine.bet_one() == 2
+    machine.run(0x43080, 0x430A0)
+    assert (machine.read_env("pulse_multi_calls"), machine.read_env("pulse_multi_coins")) == (1, 2)
+    assert machine.read_env("spl_coins") == 2
 
 
 @pytest.mark.parametrize("profile_lines", [0, 3])

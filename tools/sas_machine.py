@@ -184,6 +184,9 @@ class MachineReading:
     extension_info: se.Info
     extension_status: se.MachineStatus
     reel_stops: tuple
+    info: dict | None = None  # 1F reply
+    features: dict | None = None  # A0 game-0 reply, or None when silent
+    options_raw: bytes | None = None  # FW_OP_READ_OPTIONS bytes when firmware supports OPTIONS
 
 
 # Reads
@@ -199,11 +202,28 @@ def read(host: sas.Host, name: str, *values: object, retry: bool = True, observe
     return result["reply"]
 
 
-def cents_per_credit(host: sas.Host, *, observe: Observe | None = None) -> int:
-    """Whole cents per credit from 1F's denomination, or 0 when it is not whole cents."""
-    dollars = DENOMINATIONS.get(read(host, "info", observe=observe).get("denomination"))
+def game_info(host: sas.Host, *, observe: Observe | None = None) -> dict:
+    """1F: gaming machine ID, denomination, progressive group and game_options."""
+    return read(host, "info", observe=observe)
+
+
+def enabled_features(host: sas.Host, *, observe: Observe | None = None) -> dict | None:
+    """A0 game 0: enabled SAS features, or None if the machine does not answer."""
+    try:
+        return read(host, "features", 0, observe=observe)
+    except ReadFailed:
+        return None
+
+
+def _cents_from_info(reply: dict) -> int:
+    dollars = DENOMINATIONS.get(reply.get("denomination"))
     cents = Decimal(str(dollars)) * 100 if dollars is not None else Decimal(0)
     return int(cents) if cents == cents.to_integral_value() else 0
+
+
+def cents_per_credit(host: sas.Host, *, observe: Observe | None = None) -> int:
+    """Whole cents per credit from 1F's denomination, or 0 when it is not whole cents."""
+    return _cents_from_info(game_info(host, observe=observe))
 
 
 def current_credits(host: sas.Host, *, observe: Observe | None = None) -> int:
@@ -280,20 +300,24 @@ def read_aft_state(host: sas.Host, *, pace: Pace, observe: Observe | None = None
 
 def read_state(host: sas.Host, ext: se.Extension, *, pace: Pace, observe: Observe | None = None) -> MachineReading:
     """Everything the page shows, read once: a full refresh."""
-    values = []
-    for reader in (cents_per_credit, current_credits, game_meters, money_meters, aft_lock, registration,
-                   latest_transfer):
-        if values:
-            pace()
+    info = game_info(host, observe=observe)
+    values: list[object] = [_cents_from_info(info)]
+    for reader in (current_credits, game_meters, money_meters, aft_lock, registration, latest_transfer):
+        pace()
         values.append(reader(host, observe=observe))
     pace()
     values.append(not play_disabled(host, observe=observe))
     pace()
     values.append(machine_time(host, observe=observe))
-    values += [ext.info(), ext.status()]
+    ext_info = ext.info()
+    ext_status = ext.status()
+    values += [ext_info, ext_status]
     pace()
     values.append(reel_stops(host, observe=observe))
-    return MachineReading(*values)
+    pace()
+    features = enabled_features(host, observe=observe)
+    options_raw = se.read_options(ext, ext_info)
+    return MachineReading(*values, info=info, features=features, options_raw=options_raw)
 
 
 # Money

@@ -42,7 +42,9 @@ extension commands. The original ROM files are never modified.
 
 - JSON profile upload, activation, read-back verification and stock restoration.
 - One to five logical paylines, one to three credits per line, at most 15 total
-  credits per spin. Native meters retain the total wager.
+  credits per spin. Native meters retain the total wager, and multi-line BET ONE
+  pulses all wagered credits to the progressive/total-in relay via native
+  `0x3976c(step)` at `0x4309a` (after lock release).
 - Configurable stop weights and eleven ordered payout records, with nominal
   awards from 0 to 1500 per record. Symbols and physical reel strips stay fixed.
 - Remote bet-and-spin, and a one-shot selected outcome for an eligible normal game.
@@ -52,6 +54,12 @@ extension commands. The original ROM files are never modified.
   computer running `tools/sas`) before explicit initialization, interrupted-write
   recovery, and refusal to erase known request history. See
   [PROVISIONING.md](PROVISIONING.md); the hardware side remains unqualified.
+- Read-only SafeRAM setup-option query (`FW_OP_READ_OPTIONS = 3`,
+  `FW_CAP_OPTIONS = 0x20`) returning `[0x43E800, 0x43E8E8)` in chunks of up to 64
+  bytes so the host can decode all Bally S6000 setup options over J10, plus an
+  allowlisted SafeRAM setup-option writer (`FW_OP_SET_OPTION = 20`,
+  `FW_CAP_SET_OPTION = 0x40`) that requires an idle machine and keeps SAS/host
+  link options (`98`, `99`, `78Hi`, `17`, `92`, `23`) read-only.
 - Diagnostic reel positioning and jog state machines with their native hooks,
   **disabled in the default image** (`MOTION_QUALIFIED=0`). INFO does not advertise
   these capabilities, and they must not be enabled before the motor, timeout and

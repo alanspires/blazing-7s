@@ -12,6 +12,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import sas_extension as se
+import sas_options as so
 import sas_profile as sp
 import web_state as ws
 import web_views as wv
@@ -986,6 +987,60 @@ class StaticAssetsTest(unittest.TestCase):
         for asset in re.findall(r'(?:href|src)="/static/([^"]+)"', markup):
             with self.subTest(asset):
                 self.assertTrue((STATIC / asset).is_file())
+
+
+class MachineOptionsViewTest(unittest.TestCase):
+    def test_settings_renders_none_sas_summary_and_full_firmware_options(self):
+        empty = render(online(options=None), wv.View(page="settings"))
+        panel = empty.one(data_region="options")
+        self.assertEqual(panel.attrs["data-source"], "none")
+
+        sas_opts = ws.MachineOptions(
+            "sas",
+            so.decode_sas_summary(
+                {"denomination": 6, "progressive_group": 0, "game_options": "0x0168",
+                 "paytable": "E59521", "base_percent": "9085"},
+                {"features_1": "0xA6", "features_2": "0x5D", "features_3": "0x01"},
+            ),
+        )
+        sas_root = render(online(options=sas_opts), wv.View(page="settings"))
+        sas_panel = sas_root.one(data_region="options")
+        self.assertEqual(sas_panel.attrs["data-source"], "sas")
+        self.assertIn("0x0168", sas_panel.one(data_option="07/02").text())
+        self.assertIn("AFT", sas_panel.one(data_option="A0").text())
+
+        fw_raw = so.default_options_block(progressive_type=4, external_jackpots=1, sas_address=1, progressive_id=1)
+        fw_opts = ws.MachineOptions("firmware", so.decode_setup_options(fw_raw))
+        # Read-only when SET_OPTION capability is absent
+        ro_root = render(online(options=fw_opts), wv.View(page="settings"))
+        ro_panel = ro_root.one(data_region="options")
+        self.assertEqual((ro_panel.attrs["data-source"], ro_panel.attrs["data-editable"]), ("firmware", "0"))
+        self.assertIn("0004", ro_panel.one(data_option="02").text())
+        self.assertIn("S/MPI", ro_panel.one(data_option="02").text())
+        self.assertEqual(ro_panel.find("form"), [])
+
+        # Editable when SET_OPTION capability is advertised; host/SAS options stay read-only
+        edit_info = replace(online().ext_info,
+                            capabilities=CAPABILITIES | se.Capability.OPTIONS | se.Capability.SET_OPTION)
+        ed_root = render(online(ext_info=edit_info, options=fw_opts), wv.View(page="settings"))
+        ed_panel = ed_root.one(data_region="options")
+        self.assertEqual(ed_panel.attrs["data-editable"], "1")
+        opt02 = ed_panel.one(data_option="02")
+        self.assertEqual(len(opt02.find("select")), 1)
+        self.assertEqual(len(opt02.find("button", data_part="save-option-02")), 1)
+        opt78lo = ed_panel.one(data_option="78Lo")
+        self.assertEqual(len(opt78lo.find("input")), 3)  # hidden option, hidden return_to, value input
+        self.assertEqual(ed_panel.one(data_option="98").find("form"), [])
+        self.assertEqual(ed_panel.one(data_option="78Hi").find("form"), [])
+
+        # Form parsing accepts allowlisted options and rejects disallowed or out-of-range ones
+        action = wv.action_from_form(Act.SET_OPTION.value, "s1", {wv.F_OPTION: "02", wv.F_VALUE: "4"},
+                                     online(ext_info=edit_info, options=fw_opts))
+        self.assertEqual((action.name, action.params["option"], action.params["value"]),
+                         (Act.SET_OPTION, "02", "4"))
+        with self.assertRaises(wv.FormError):
+            wv.action_from_form(Act.SET_OPTION.value, "s2", {wv.F_OPTION: "98", wv.F_VALUE: "0"},
+                                online(ext_info=edit_info, options=fw_opts))
 
 
 if __name__ == "__main__":

@@ -84,6 +84,8 @@ void test_reset(void) {
     test_state.idle = 1;
 }
 void test_active(uint32_t n) { test_state.active = n; }
+void test_idle(uint32_t n) { test_state.idle = n; }
+void test_motion_busy(uint32_t n) { test_state.motion_busy = n; }
 void test_fault(uint32_t n) { test_state.fault = n; }
 void test_boot_result(uint32_t n) { test_state.boot_result = n; }
 void test_clear_result(uint32_t n) { test_state.clear_result = n; }
@@ -736,7 +738,16 @@ def test_geometry_faults_and_explicit_boot_initialization(compiled):
     assert machine.call("platform_geometry_ok") == 1
     assert machine.call("platform_native_fault") == 0
     expected = sum(
-        c("CAP_" + name) for name in ("PROFILE", "OUTCOME", "SPIN", "POSITION", "JOG")
+        c("CAP_" + name)
+        for name in (
+            "PROFILE",
+            "OUTCOME",
+            "SPIN",
+            "OPTIONS",
+            "SET_OPTION",
+            "POSITION",
+            "JOG",
+        )
     )
     assert machine.call("fw_capabilities") == expected
     machine.call("platform_boot")
@@ -909,3 +920,36 @@ def test_custom_profile_reporting_preserves_framing_and_marks_unknown_percentage
     assert actual[:offset] == initial[:offset]
     assert actual[offset : offset + 6] == b"CUSTOM"
     assert actual[offset + 6 : offset + 10] == b" " * 4
+
+
+def test_set_option_writes_saferam_via_protected_writer_and_enforces_idle(compiled):
+    machine = Platform(compiled)
+    base = c("OPTIONS_BASE")
+    machine.cpu.write(base, bytes(c("OPTIONS_SIZE")))
+    payload = bytes((0x05, 1, 4))  # Opt 02 = S/MPI
+    machine.cpu.write(DATA, payload)
+    assert u8(machine.call("fw_submit", c("OP_SET_OPTION"), DATA, len(payload), 0, 1)) == c("OK")
+    assert machine.cpu.read_u8(base + 0x05) == 4
+    assert machine.cpu.read_u8(0xFF101C) == 1  # 0x400 SafeRAM write-unlock pulse
+
+    # Multi-byte write (Opt 78Lo = "0001")
+    payload4 = bytes((0x24, 4)) + b"0001"
+    machine.cpu.write(DATA, payload4)
+    assert u8(machine.call("fw_submit", c("OP_SET_OPTION"), DATA, len(payload4), 0, 2)) == c("OK")
+    assert machine.cpu.read(base + 0x24, 4) == b"0001"
+
+    # Busy (game not idle or motion busy) refuses without writing
+    machine.call("test_idle", 0)
+    machine.cpu.write(DATA, bytes((0x05, 1, 0)))
+    assert u8(machine.call("fw_submit", c("OP_SET_OPTION"), DATA, 3, 0, 3)) == c("BUSY")
+    assert machine.cpu.read_u8(base + 0x05) == 4
+    machine.call("test_idle", 1)
+    machine.call("test_motion_busy", 1)
+    assert u8(machine.call("fw_submit", c("OP_SET_OPTION"), DATA, 3, 0, 4)) == c("BUSY")
+    assert machine.cpu.read_u8(base + 0x05) == 4
+    machine.call("test_motion_busy", 0)
+
+    # Native fault refuses without writing
+    machine.cpu.write_u8(0x43C31C, 1)
+    assert u8(machine.call("fw_submit", c("OP_SET_OPTION"), DATA, 3, 0, 5)) == c("FAULT")
+    assert machine.cpu.read_u8(base + 0x05) == 4

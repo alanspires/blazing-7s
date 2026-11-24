@@ -6,10 +6,17 @@ physical serial, scheduler, accounting or motor test.
 
 import pytest
 import sas_extension as se
+import sas_options as so
 import sas_profile as sp
 from sas_protocol import with_crc
 
-from firmware.tests.support import HOST_ADDRESS, NATIVE_TRANSMIT, receive, transmitted
+from firmware.tests.support import (
+    HOST_ADDRESS,
+    HOST_PORT,
+    NATIVE_TRANSMIT,
+    receive,
+    transmitted,
+)
 from firmware.tests.support import fw_constant as c
 from firmware.tests.test_game import (
     LINES,
@@ -113,3 +120,45 @@ def test_host_busy_commit_never_changes_native_wager_or_configuration(connected)
     assert ext.mutate(se.Op.COMMIT_PROFILE, ext.info().next_id, record=no_record) == se.Status.OK
     assert sp.encode(se.download(ext)[0]) == data
     assert not machine.busy()
+
+
+def test_host_reads_setup_options_from_saferam(connected):
+    machine, ext = connected
+    info = ext.info()
+    assert info.capabilities & se.Capability.OPTIONS
+    block = bytearray(so.default_options_block(progressive_type=4, external_jackpots=1, sas_address=1, progressive_id=1))
+    # receive() and CpuSasHost write HOST_PORT (0x43E8D6) and HOST_ADDRESS (0x43E8DC).
+    block[HOST_PORT - c("OPTIONS_BASE")] = 1
+    block[HOST_ADDRESS - c("OPTIONS_BASE")] = SAS_ADDRESS
+    machine.cpu.write(c("OPTIONS_BASE"), bytes(block))
+    raw = se.read_options(ext, info)
+    assert raw == bytes(block)
+    rows = {row.code: row for row in so.decode_setup_options(raw)}
+    assert rows["02"].raw == "0004"
+    assert rows["07"].raw == "0001"
+    assert rows["78Lo"].raw == "0001"
+
+
+def test_host_sets_allowlisted_options_and_rejects_host_link_options(connected):
+    machine, ext = connected
+    info = ext.info()
+    assert info.capabilities & se.Capability.SET_OPTION
+    block = bytearray(so.default_options_block(progressive_type=0, external_jackpots=0, progressive_id=0))
+    block[HOST_PORT - c("OPTIONS_BASE")] = 1
+    block[HOST_ADDRESS - c("OPTIONS_BASE")] = SAS_ADDRESS
+    machine.cpu.write(c("OPTIONS_BASE"), bytes(block))
+
+    for code, val in (("02", "4"), ("07", "1"), ("78Lo", "1"), ("56", "1200")):
+        res = se.set_option(ext, so.encode_option_write(code, val), record=no_record)
+        assert res["status"] == se.Status.OK.name
+    rows = {row.code: row for row in so.decode_setup_options(res["options_raw"])}
+    assert rows["02"].raw == "0004"
+    assert rows["07"].raw == "0001"
+    assert rows["78Lo"].raw == "0001"
+    assert rows["56"].raw == "001200"
+
+    # Disallowed Primary Host option 98 (offset 0xA3) must be refused by compiled firmware
+    with pytest.raises(se.Refused) as refused:
+        se.set_option(ext, bytes((0xA3, 1, 0)), record=no_record)
+    assert refused.value.status == se.Status.BAD_REQUEST
+

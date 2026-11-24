@@ -73,6 +73,7 @@ struct game_runtime {
     uint8_t stops[FW_REELS];
     uint8_t profile_change; /* owned by core from prepare to finish; may latch */
     uint8_t dispatching;    /* task 6 is dispatching an event this hook returned */
+    uint8_t last_bet_step;  /* credits added by the last accepted game_bet_one */
     uint16_t held_count;    /* event dequeued after ownership began, redelivered */
     uint32_t held_event;
     uint32_t records;
@@ -257,6 +258,7 @@ uint32_t game_bet_one(void)
     uint32_t lines = game_lines(), total, step;
     if (lines == 0u) {
         bet_one_credit();
+        state.last_bet_step = 1u;
         return 1u;
     }
     if (lines == LINES_INCONSISTENT)
@@ -266,6 +268,7 @@ uint32_t game_bet_one(void)
     step = lines - total % lines;
     if (total + step > MMIO8(MAX_WAGER) || counter_compare(COUNTER_CREDITS, step) < 0)
         return 0u;
+    state.last_bet_step = (uint8_t)step;
     bet_one_credit();
     /* The native continuation (0x42fb2) initializes a new game only when the
      * wager is exactly one credit; do it there, once, before the other lines. */
@@ -274,6 +277,22 @@ uint32_t game_bet_one(void)
     while (--step != 0u)
         bet_one_credit();
     return 1u;
+}
+
+/* 0x4309a 4eb9000396e2 -> JSR game_bet_one_pulse (after 0x3d88 unlock).
+ * Stock and 1-line bets keep native 0x396e2; multi-line BET ONE pulses all
+ * `step` coins via native 0x3976c(step) and tops up SPL counter 0x99. */
+void game_bet_one_pulse(void)
+{
+    uint32_t step = state.last_bet_step;
+    state.last_bet_step = 0u;
+    if (step > 1u) {
+        if (MMIO8(0x41001fu) == 1u)
+            ((void (*)(uint32_t, uint32_t))(uintptr_t)0x53dd0u)(0x52u, step - 1u);
+        ((void (*)(uint32_t))(uintptr_t)0x3976cu)(step);
+    } else {
+        ((void (*)(void))(uintptr_t)0x396e2u)();
+    }
 }
 
 /* No game may start: profile change owned, diagnostic motion owned or

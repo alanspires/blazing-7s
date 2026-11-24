@@ -37,7 +37,8 @@ void test_reset(void) {
     test_ports.drop = UINT32_MAX;
     test_ports.idle = 1;
     test_ports.caps = FW_CAP_PROFILE | FW_CAP_OUTCOME | FW_CAP_SPIN |
-                      FW_CAP_POSITION | FW_CAP_JOG;
+                      FW_CAP_POSITION | FW_CAP_JOG | FW_CAP_OPTIONS |
+                      FW_CAP_SET_OPTION;
     test_ports.submit_status = FW_ACCEPTED;
     test_ports.current_status = FW_ACCEPTED;
     test_ports.context = 0x12345678u; /* CONTEXT */
@@ -315,7 +316,16 @@ def test_discovery_boot_restore_and_bounds(compiled):
         assert info[key] == c(key.upper())
     assert info["next_id"] == 1
     assert info["caps"] == sum(
-        c("CAP_" + name) for name in ("PROFILE", "OUTCOME", "SPIN", "POSITION", "JOG")
+        c("CAP_" + name)
+        for name in (
+            "PROFILE",
+            "OUTCOME",
+            "SPIN",
+            "POSITION",
+            "JOG",
+            "OPTIONS",
+            "SET_OPTION",
+        )
     )
     assert machine.request(c("OP_INFO"), ident=1).status == c("BAD_ID")
     assert machine.request(c("OP_INFO"), version=c("VERSION") + 1).status == c(
@@ -1200,3 +1210,79 @@ def test_boot_ignores_poisoned_slot_scratch_and_preserves_reservation_neighbors(
     assert restarted.cpu.read(scratch, c("SLOT_SIZE")) == bytes(c("SLOT_SIZE"))
     for address, data in neighbors.items():
         assert restarted.cpu.read(address, len(data)) == data
+
+
+def test_read_options_chunks_bounds_and_capability(compiled):
+    machine = Machine(compiled)
+    base, size, max_payload = c("OPTIONS_BASE"), c("OPTIONS_SIZE"), c("MAX_PAYLOAD")
+    sample = bytes((i * 29 + 7) & 0xFF for i in range(size))
+    machine.cpu.write(base, sample)
+    read = bytearray()
+    while len(read) < size:
+        count = min(max_payload, size - len(read))
+        reply = machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", len(read), count))
+        assert reply.status == c("OK")
+        assert len(reply.payload) == count
+        read += reply.payload
+    assert bytes(read) == sample
+
+    # Validation and capability checks
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", 0, 1), ident=1).status == c("BAD_ID")
+    assert machine.request(c("OP_READ_OPTIONS"), b"").status == c("BAD_REQUEST")
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", 0, 0)).status == c("BAD_REQUEST")
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", 0, max_payload + 1)).status == c("BAD_REQUEST")
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", size, 1)).status == c("BAD_REQUEST")
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", size - 4, 5)).status == c("BAD_REQUEST")
+
+    machine.call("test_capabilities", c("CAP_PROFILE"))
+    assert machine.request(c("OP_READ_OPTIONS"), struct.pack("<HB", 0, 8)).status == c("UNSUPPORTED")
+
+
+def test_set_option_allowlist_validation_and_idempotency(compiled):
+    machine = Machine(compiled)
+    machine.call("test_submit_status", c("OK"))
+
+    # Allowlisted u8 (Opt 02 = 4 S/MPI, Opt 07 = 1), bcd2 (Opt 06 = 12), bcd3 (Opt 56 = 800), ascii4 (Opt 78Lo = "0001")
+    for payload in (
+        bytes((0x05, 1, 4)),
+        bytes((0x06, 1, 1)),
+        bytes((0x3C, 2, 0x00, 0x12)),
+        bytes((0x18, 3, 0x00, 0x08, 0x00)),
+        bytes((0x24, 4)) + b"0001",
+    ):
+        before = machine.call("test_submitted")
+        ident = machine.info()["next_id"]
+        reply = machine.mutate(c("OP_SET_OPTION"), payload)
+        assert reply.status == c("OK")
+        assert machine.call("test_submitted") == before + 1
+        # Exact repeat returns recorded OK without executing again
+        repeat = machine.request(c("OP_SET_OPTION"), payload, ident=ident)
+        assert repeat.status == c("OK")
+        assert machine.call("test_submitted") == before + 1
+
+    # Invalid values and non-allowlisted SAS/host/DIP options must be refused before fw_submit
+    submitted = machine.call("test_submitted")
+    for bad in (
+        b"",
+        bytes((0x05, 1, 9)),                # Opt 02 > max 8
+        bytes((0x06, 1, 5)),                # Opt 07 > max 4
+        bytes((0x4B, 1, 0)),                # Opt 61 < min 1
+        bytes((0x3C, 2, 0x02, 0x56)),       # Opt 06 > max 255
+        bytes((0x3C, 2, 0x0A, 0x00)),       # invalid BCD nibble
+        bytes((0x24, 4)) + b"00A1",         # non-digit ASCII
+        bytes((0x05, 2, 4, 0)),             # wrong length for Opt 02
+        bytes((0xA3, 1, 0)),                # Opt 98 Primary Host (read-only)
+        bytes((0xA4, 1, 1)),                # Opt 99 Secondary Host (read-only)
+        bytes((0x20, 4)) + b"0002",         # Opt 78Hi Primary SAS address (read-only)
+        bytes((0xC6, 1, 0)),                # Opt 17 SAS version (read-only)
+        bytes((0xA2, 1, 0)),                # Opt 92 SAS bonusing (read-only)
+        bytes((0x00, 1, 1)),                # Opt 27 Bet mode (read-only)
+    ):
+        reply = machine.mutate(c("OP_SET_OPTION"), bad)
+        assert reply.status == c("BAD_REQUEST")
+    assert machine.call("test_submitted") == submitted
+
+    machine.call("test_capabilities", c("CAP_PROFILE") | c("CAP_OPTIONS"))
+    assert machine.mutate(c("OP_SET_OPTION"), bytes((0x05, 1, 4))).status == c("UNSUPPORTED")
+    assert machine.call("test_submitted") == submitted
+

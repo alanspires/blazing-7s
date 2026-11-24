@@ -2460,3 +2460,119 @@ button.switch:disabled {
   box-shadow: var(--shadow-sheet);
   transform: translateX(-50%);
 }
+
+/* ---------- Machine setup options (Settings) ---------- */
+
+.panel--options {
+  grid-column: 1 / -1;
+}
+
+.options-groups {
+  display: grid;
+  gap: var(--space-l);
+  margin-top: var(--space-m);
+}
+
+.options-group__title {
+  margin: 0 0 var(--space-xs);
+  color: var(--color-ink-muted);
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.options-table-wrap {
+  overflow-x: auto;
+}
+
+.options-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--size-s);
+}
+
+.options-table th,
+.options-table td {
+  padding: var(--space-xs) var(--space-s);
+  border-bottom: 1px solid var(--color-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.options-table thead th {
+  color: var(--color-ink-muted);
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.options-table__code,
+.options-table__raw {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.options-table__code {
+  width: 4.5rem;
+  color: var(--color-ink-muted);
+  font-weight: var(--weight-bold);
+}
+
+.options-table__raw {
+  width: 6.5rem;
+  color: var(--color-ink);
+}
+
+.options-table__name {
+  font-weight: var(--weight-semibold, var(--weight-bold));
+}
+
+.options-table__meaning {
+  color: var(--color-ink);
+}
+
+.options-feedback {
+  margin-top: var(--space-s);
+}
+
+.option-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.option-edit__select,
+.option-edit__input {
+  min-height: 36px;
+  padding: 0 var(--space-s);
+  border: 1px solid var(--color-line-strong, var(--color-line));
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--size-s);
+}
+
+.option-edit__select {
+  max-width: 100%;
+}
+
+.option-edit__input {
+  width: 7.5rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.option-edit__save {
+  min-height: 36px;
+  padding: 0 var(--space-m);
+}
+
+.option-edit__note {
+  color: var(--color-ink-muted);
+  font-size: var(--size-xs);
+}

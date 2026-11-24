@@ -129,7 +129,8 @@ uint32_t fw_capabilities(void)
 {
     if (!platform_geometry_ok())
         return 0;
-    return FW_CAP_PROFILE | FW_CAP_OUTCOME | FW_CAP_SPIN | motion_capabilities();
+    return FW_CAP_PROFILE | FW_CAP_OUTCOME | FW_CAP_SPIN | FW_CAP_OPTIONS |
+           FW_CAP_SET_OPTION | motion_capabilities();
 }
 
 uint8_t fw_prepare_profile_change(uint8_t *staged, const uint8_t *active)
@@ -147,9 +148,34 @@ uint8_t fw_apply_profile(const uint8_t *slot, bool restore)
     return game_apply_profile(slot, restore, platform_state.booting != 0u);
 }
 
+static uint8_t set_option(const uint8_t *args, uint32_t length)
+{
+    uint32_t offset, count, i;
+    if (!platform_geometry_ok() || platform_native_fault())
+        return FW_FAULT;
+    if (length < 3u || length > 6u)
+        return FW_BAD_REQUEST;
+    offset = args[0];
+    count = args[1];
+    if (count == 0u || count > 4u || length != 2u + count ||
+        offset > FW_OPTIONS_SIZE || count > FW_OPTIONS_SIZE - offset)
+        return FW_BAD_REQUEST;
+    if (!game_idle() || motion_is_busy())
+        return FW_BUSY;
+    for (i = 0; i < count; ++i) {
+        uint32_t addr = FW_OPTIONS_BASE + offset + i;
+        platform_safe_u8(addr, args[2u + i]);
+        if (MMIO8(addr) != args[2u + i])
+            return FW_FAULT;
+    }
+    return FW_OK;
+}
+
 uint8_t fw_submit(uint8_t operation, const uint8_t *args, uint32_t length, uint64_t id)
 {
     uint8_t result;
+    if (operation == FW_OP_SET_OPTION)
+        return set_option(args, length);
     if (operation == FW_OP_POSITION || operation == FW_OP_JOG)
         result = motion_submit(operation, args, length, id);
     else

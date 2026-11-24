@@ -18,6 +18,7 @@ from pathlib import Path
 
 import sas
 import sas_commands as sc
+import sas_options as so
 import sas_profile as sp
 import sas_protocol as protocol
 from sas_tables import DENOMINATIONS
@@ -182,15 +183,18 @@ class FakeClock:
 EXTENSION_POLL = 0xE0
 MAGIC = b"S6RE"
 WIRE_VERSION = 1
-INFO, STATUS, READ = 0, 1, 2
-BEGIN, CHUNK, COMMIT, RESTORE = 16, 17, 18, 19
+INFO, STATUS, READ, READ_OPTIONS = 0, 1, 2, 3
+BEGIN, CHUNK, COMMIT, RESTORE, SET_OPTION = 16, 17, 18, 19, 20
 ARM, CANCEL, SPIN, POSITION, JOG = 32, 33, 34, 35, 36
-QUERIES = (INFO, STATUS, READ)
+QUERIES = (INFO, STATUS, READ, READ_OPTIONS)
 OK, ACCEPTED, BAD_REQUEST, BAD_ID, BUSY, FAULT, INVALID_PROFILE, INCOMPLETE, INTERRUPTED, UNSUPPORTED = (
     0, 1, 2, 4, 5, 6, 7, 8, 9, 10)
 MAX_PAYLOAD = 64
-PROFILE_CAP, OUTCOME_CAP, SPIN_CAP, POSITION_CAP, JOG_CAP = 0x01, 0x02, 0x04, 0x08, 0x10
-ALL_CAPS = PROFILE_CAP | OUTCOME_CAP | SPIN_CAP | POSITION_CAP | JOG_CAP
+OPTIONS_SIZE = so.OPTIONS_SIZE
+PROFILE_CAP, OUTCOME_CAP, SPIN_CAP, POSITION_CAP, JOG_CAP, OPTIONS_CAP, SET_OPTION_CAP = (
+    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40)
+ALL_CAPS = (PROFILE_CAP | OUTCOME_CAP | SPIN_CAP | POSITION_CAP | JOG_CAP
+            | OPTIONS_CAP | SET_OPTION_CAP)
 # firmware/src/fw.h: the first firmware's INFO limits.
 LIMITS = {"max_chunk": 62, "max_lines": 5, "max_bet_per_line": 3, "max_total_bet": 15,
           "stops": sp.STOPS, "max_award": 1500}
@@ -206,7 +210,7 @@ class FakeExtension:
     acts even when its reply is lost on the line."""
 
     def __init__(self, capabilities: int = ALL_CAPS, last_id: int = 41, action_status: int | None = None,
-                 **limits: int):
+                 options_raw: bytes | None = None, **limits: int):
         self.capabilities = capabilities
         self.limits = LIMITS | limits
         self.last = (last_id, ARM, b"")  # id, op and payload of the latest mutation
@@ -215,6 +219,7 @@ class FakeExtension:
         self.active: bytes | None = None
         self.generation = 3
         self.profile_crc = 0
+        self.options_raw = so.default_options_block() if options_raw is None else options_raw
         self.staged: tuple[int, bytearray, set[int]] | None = None
         self.action_status = action_status
         self.actions: Callable[[int, bytes], int] = lambda op, payload: ACCEPTED
@@ -269,6 +274,12 @@ class FakeExtension:
             offset, count = struct.unpack("<HB", payload)
             assert count <= MAX_PAYLOAD and offset + count <= sp.PROFILE_SIZE, (offset, count)
             return (INCOMPLETE, b"") if self.active is None else (OK, self.active[offset:offset + count])
+        if op == READ_OPTIONS:
+            if not (self.capabilities & OPTIONS_CAP):
+                return UNSUPPORTED, b""
+            offset, count = struct.unpack("<HB", payload)
+            assert count <= MAX_PAYLOAD and offset + count <= OPTIONS_SIZE, (offset, count)
+            return OK, self.options_raw[offset:offset + count]
         if id == self.last[0] and (op, payload) == self.last[1:]:
             return self.last_status, b""  # the recorded answer; nothing happens again
         if id <= self.last[0]:
@@ -309,6 +320,18 @@ class FakeExtension:
         if op == RESTORE:
             self.active, self.profile_crc = None, 0
             self.generation += 1
+            return OK
+        if op == SET_OPTION:
+            if not (self.capabilities & SET_OPTION_CAP):
+                return UNSUPPORTED
+            if len(payload) < 3 or payload[1] + 2 != len(payload):
+                return BAD_REQUEST
+            offset, count = payload[0], payload[1]
+            if offset + count > OPTIONS_SIZE:
+                return BAD_REQUEST
+            buf = bytearray(self.options_raw)
+            buf[offset:offset + count] = payload[2:]
+            self.options_raw = bytes(buf)
             return OK
         return self.action_status if self.action_status is not None else self.actions(op, payload)
 
@@ -698,6 +721,9 @@ class FakeS6000(FakeLine):
 
     def _info(self, v):
         return "BS", "105", self.DENOMINATION, 3, 0, "0x0168", "E59521", "9085"
+
+    def _features(self, v):
+        return 0, "0xA6", "0x5D", "0x01", "000000"
 
     def _credits(self, v):
         return (self.meters[0x0C],)

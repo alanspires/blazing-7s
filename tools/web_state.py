@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field, replace
 from types import MappingProxyType
 
 import sas_extension as se
+import sas_options as so
 import sas_profile as sp
 
 RESULTS_LIMIT = 32  # newest action results kept in a snapshot and served by /state.json
@@ -67,6 +68,7 @@ class Act(enum.Enum):
     CASH_OUT = "cash-out"
     APPLY_PROFILE = "apply-profile"
     RESTORE_STOCK = "restore-stock"
+    SET_OPTION = "set-option"
     PLAY = "play"
     SOUND = "sound"
     BILLS = "bills"
@@ -77,7 +79,7 @@ FAMILIES = MappingProxyType({
     Act.ADD_CREDITS: Family.MONEY, Act.CASH_OUT: Family.MONEY,
     Act.MAX_BET: Family.EXTENSION, Act.SPIN: Family.EXTENSION, Act.ARM: Family.EXTENSION,
     Act.CANCEL_ARM: Family.EXTENSION, Act.APPLY_PROFILE: Family.EXTENSION,
-    Act.RESTORE_STOCK: Family.EXTENSION, Act.PLAY: Family.PLAY,
+    Act.RESTORE_STOCK: Family.EXTENSION, Act.SET_OPTION: Family.EXTENSION, Act.PLAY: Family.PLAY,
 })
 
 
@@ -243,6 +245,14 @@ class Settings:
 
 
 @dataclass(frozen=True)
+class MachineOptions:
+    """Decoded S6000 setup options: either the full SafeRAM block ('firmware') or the stock
+    SAS 1F/A0 summary ('sas') when the installed EPROMs do not advertise Capability.OPTIONS."""
+    source: str
+    rows: tuple[so.OptionRow, ...]
+
+
+@dataclass(frozen=True)
 class Counters:
     """Money moved by this page, from the journal."""
     credits_added: int = 0
@@ -317,6 +327,7 @@ class MachineState:
     checking: Mapping[Family, Hold] = field(default_factory=lambda: MappingProxyType({}))
     last_spin: LastSpin | None = None
     settings: Settings = Settings()
+    options: MachineOptions | None = None
     counters: Counters = Counters()
     log: tuple[Mapping[str, object], ...] = ()  # newest ACTIVITY_KINDS records, newest first
     results: tuple[ActionResult, ...] = ()  # newest first, at most RESULTS_LIMIT
@@ -458,6 +469,23 @@ def _cash_out(state: MachineState, action: Action) -> tuple[Code, str] | None:
     return None
 
 
+def _set_option(state: MachineState, action: Action) -> tuple[Code, str] | None:
+    if (refused := _extension(state, se.Capability.SET_OPTION)):
+        return refused
+    if state.options is None or state.options.source != "firmware":
+        return Code.UNSUPPORTED, "Setup options cannot be edited on this firmware"
+    if (refused := _busy(state)):
+        return refused
+    if (refused := _pending(state, action.name)):
+        return refused
+    if "option" in action.params or "value" in action.params:
+        try:
+            so.encode_option_write(str(action.params.get("option", "")), str(action.params.get("value", "")))
+        except ValueError as err:
+            return Code.BAD_AMOUNT, str(err)
+    return None
+
+
 def _setting(state: MachineState, action: Action) -> tuple[Code, str] | None:
     return None
 
@@ -465,7 +493,8 @@ def _setting(state: MachineState, action: Action) -> tuple[Code, str] | None:
 _RULES = MappingProxyType({
     Act.BET_ONE: _bet_selection, Act.MAX_BET: _max_bet, Act.SPIN: _spin, Act.ARM: _arm,
     Act.CANCEL_ARM: _cancel_arm, Act.APPLY_PROFILE: _profile_change,
-    Act.RESTORE_STOCK: _profile_change, Act.ADD_CREDITS: _add_credits, Act.CASH_OUT: _cash_out,
+    Act.RESTORE_STOCK: _profile_change, Act.SET_OPTION: _set_option,
+    Act.ADD_CREDITS: _add_credits, Act.CASH_OUT: _cash_out,
     Act.PLAY: _setting, Act.SOUND: _setting, Act.BILLS: _setting, Act.CLOCK_SYNC: _setting,
 })
 
@@ -597,6 +626,10 @@ def public_view(state: MachineState) -> dict:
         "checking": {family.value: {"reason": hold.reason, "intent_seq": hold.intent_seq}
                      for family, hold in state.checking.items()},
         "extension_fault": extension_fault(state),
+        "options": (None if state.options is None else {
+            "source": state.options.source,
+            "rows": [asdict(row) for row in state.options.rows],
+        }),
         "results": [_result(r) for r in state.results[:RESULTS_LIMIT]],
     }
 

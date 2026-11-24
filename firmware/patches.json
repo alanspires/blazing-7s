@@ -31,6 +31,7 @@
     {"name": "game-native-start-ownership-padding", "offset": "0x61178", "expected": "3c00", "replacement": "4e71"},
     {"name": "game-native-event-reader", "offset": "0xa53e", "expected": "4eb90000ae6a", "symbol": "game_next_event", "kind": "jsr"},
     {"name": "game-whole-line-bet", "offset": "0x42fac", "expected": "4eb90004341c", "symbol": "game_bet_one_entry", "kind": "jsr"},
+    {"name": "game-bet-one-pulse", "offset": "0x4309a", "expected": "4eb9000396e2", "symbol": "game_bet_one_pulse", "kind": "jsr"},
     {"name": "game-repeat-wager", "offset": "0x4324e", "expected": "4eb9000549c8", "symbol": "game_repeat_wager", "kind": "jsr"},
     {"name": "game-per-line-evaluator-wager", "offset": "0x65168", "expected": "4eb900035fdc", "symbol": "game_evaluate_wager", "kind": "jsr"},
     {"name": "game-diagnostic-wager", "offset": "0x3fc34", "expected": "23c0004103b0", "symbol": "game_diag_wager_entry", "kind": "jsr"},

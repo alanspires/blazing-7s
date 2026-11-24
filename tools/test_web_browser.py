@@ -604,3 +604,20 @@ def test_every_control_is_reachable_and_usable(site, pages, viewport):
             else:
                 control.scroll_into_view_if_needed()
                 expect(control, where).to_be_in_viewport()
+
+
+def test_settings_edits_allowlisted_setup_option_and_updates_live(site, pages):
+    page = pages.open("/settings")
+    panel = page.locator('[data-region="options"]')
+    expect(panel).to_have_attribute("data-source", "firmware")
+    expect(panel).to_have_attribute("data-editable", "1")
+    row02 = panel.locator('tr[data-option="02"]')
+    expect(row02.locator(".options-table__raw")).to_have_text("0000")
+    expect(panel.locator('tr[data-option="98"] form')).to_have_count(0)
+
+    row02.locator('select[name="value"]').select_option("4")
+    part(page, "save-option-02").click()
+    expect(row02.locator(".options-table__raw")).to_have_text("0004")
+    expect(row02.locator('select[name="value"]')).to_have_value("4")
+    expect(panel.locator(".options-feedback")).to_be_visible()
+    assert site.machine.extension.options_raw[0x05] == 4

@@ -14,6 +14,7 @@ from unittest import mock
 import sas_commands as sc
 import sas_extension as se
 import sas_machine as sm
+import sas_options as so
 import sas_profile as sp
 import sas_protocol as protocol
 import web_state as ws
@@ -1106,6 +1107,58 @@ class PhysicalEventsTest(WorkerTest):
         self.assertIn("handpay", [r.get("event") for r in records])
         self.assertEqual(rig.records("spin")[0]["source"], "machine")
         self.assertIsNotNone(ws.open_door(rig.state))
+
+
+class MachineOptionsWorkerTest(WorkerTest):
+    def test_worker_reads_full_options_when_supported_and_refreshes_on_option_change(self):
+        rig = self.rig()
+        rig.machine.extension.options_raw = so.default_options_block(progressive_type=0, external_jackpots=0)
+        rig.start()
+        self.assertIsNotNone(rig.state.options)
+        self.assertEqual(rig.state.options.source, "firmware")
+        by_code = {row.code: row for row in rig.state.options.rows}
+        self.assertEqual(by_code["02"].raw, "0000")
+        self.assertEqual(by_code["07"].raw, "0000")
+
+        # Operator changes options at the cabinet: 0x3C triggers a targeted options refresh.
+        rig.machine.extension.options_raw = so.default_options_block(progressive_type=4, external_jackpots=1)
+        rig.machine.pending.append(ww.OPTIONS_CHANGED)
+        rig.drive(lambda: {row.code: row for row in rig.state.options.rows}["02"].raw == "0004")
+        updated = {row.code: row for row in rig.state.options.rows}
+        self.assertEqual((updated["02"].raw, updated["07"].raw), ("0004", "0001"))
+
+    def test_worker_falls_back_to_stock_sas_summary_without_options_capability(self):
+        rig = self.rig()
+        rig.machine.extension.capabilities &= ~se.Capability.OPTIONS
+        rig.start()
+        self.assertIsNotNone(rig.state.options)
+        self.assertEqual(rig.state.options.source, "sas")
+        by_code = {row.code: row for row in rig.state.options.rows}
+        self.assertEqual(by_code["07/02"].raw, "0x0168")
+        self.assertIn("AFT", by_code["A0"].meaning)
+
+    def test_worker_sets_allowlisted_option_and_reconciles_lost_reply(self):
+        rig = self.rig()
+        rig.machine.extension.options_raw = so.default_options_block(progressive_type=0, external_jackpots=0)
+        rig.start()
+        result = rig.act(Act.SET_OPTION, "set-02", option="02", value="4")
+        self.assertEqual((result.state, result.outcome), (ResultState.DONE, OutcomeWord.CONFIRMED))
+        by_code = {row.code: row for row in rig.state.options.rows}
+        self.assertEqual(by_code["02"].raw, "0004")
+        self.assertEqual(rig.machine.extension.options_raw[0x05], 4)
+
+        # Disallowed Primary Host option 98 is refused before anything is sent
+        refused = rig.submit(Act.SET_OPTION, "bad-98", option="98", value="0")
+        self.assertIsInstance(refused, ws.Refusal)
+        self.assertEqual(refused.code, Code.BAD_AMOUNT)
+
+        # Lost reply on SET_OPTION holds Family.EXTENSION, reconciles via STATUS, and reads back SafeRAM
+        rig.machine.lose.add(se.Op.SET_OPTION)
+        rig.assertSubmitted(rig.submit(Act.SET_OPTION, "set-07", option="07", value="1"))
+        settled = rig.finish("set-07", (ResultState.DONE,))
+        self.assertEqual(settled.outcome, OutcomeWord.HAPPENED)
+        rig.drive(lambda: {row.code: row for row in rig.state.options.rows}["07"].raw == "0001")
+        self.assertEqual(rig.machine.extension.options_raw[0x06], 1)
 
 
 if __name__ == "__main__":

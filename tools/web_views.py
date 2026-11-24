@@ -33,6 +33,8 @@ from functools import lru_cache
 from types import MappingProxyType
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import sas_extension as se
+import sas_options as so
 import sas_profile as sp
 import web_state as ws
 from web_state import (
@@ -67,6 +69,8 @@ F_RETURN = "return_to"
 F_AMOUNT = "amount"
 F_OUTCOME = "outcome"
 F_ON = "on"
+F_OPTION = "option"
+F_VALUE = "value"
 F_LINES = "lines"
 
 # The expected values each action carries because admit compares them against fresh state.
@@ -107,6 +111,7 @@ ACTION_LABELS = MappingProxyType({
     Act.BET_ONE: "Bet one", Act.MAX_BET: "Max bet", Act.SPIN: "Spin", Act.ARM: "Set next result",
     Act.CANCEL_ARM: "Cancel next result", Act.ADD_CREDITS: "Add credits", Act.CASH_OUT: "Cash out",
     Act.APPLY_PROFILE: "Apply to machine", Act.RESTORE_STOCK: "Restore stock game",
+    Act.SET_OPTION: "Save setup option",
     Act.PLAY: "Play on or off", Act.SOUND: "Sound", Act.BILLS: "Bill acceptor",
     Act.CLOCK_SYNC: "Set the clock",
 })
@@ -222,6 +227,15 @@ def action_from_form(route: str, submission_id: str, fields: Mapping[str, str],
         if on not in ("0", "1"):
             raise FormError(f"{F_ON} must be 0 or 1")
         params[F_ON] = on == "1"
+    elif name is Act.SET_OPTION:
+        option = fields.get(F_OPTION, "").strip()
+        value = fields.get(F_VALUE, "").strip()
+        try:
+            so.encode_option_write(option, value)
+        except ValueError as err:
+            raise FormError(str(err), Code.BAD_AMOUNT) from None
+        params[F_OPTION] = option
+        params[F_VALUE] = value
     elif name is Act.APPLY_PROFILE:
         draft = parse_draft(state, fields)
         if draft.profile is None:
@@ -391,7 +405,8 @@ def _region_builders(ctx: _Ctx) -> dict[str, Callable[[], str]]:
     elif view.page == "activity":
         builders.update({"log": lambda: _log(ctx), "meters": lambda: _meter_tiles(ctx)})
     else:
-        builders.update({"settings": lambda: _settings(ctx), "about": lambda: _about(ctx)})
+        builders.update({"settings": lambda: _settings(ctx), "about": lambda: _about(ctx),
+                         "options": lambda: _options_panel(ctx)})
     return builders
 
 
@@ -1629,6 +1644,15 @@ def _describe_outcome(record: Mapping[str, object]) -> str:
             return _e(f"{label}: the machine refused")
     if action == Act.CLOCK_SYNC.value:
         return "Machine clock set" if word is OutcomeWord.CONFIRMED else "Machine clock: not confirmed"
+    if action == Act.SET_OPTION.value:
+        code = record.get("option_code")
+        val = record.get("option_value")
+        opt_label = f"Option {code} ({so.option_name(str(code))})" if code else "Setup option"
+        if word in (OutcomeWord.CONFIRMED, OutcomeWord.HAPPENED):
+            return _e(f"{opt_label} set to {val}{checked}")
+        if word is OutcomeWord.REFUSED:
+            return _e(f"{opt_label}: the machine refused")
+        return _e(f"{opt_label}: {result.replace('_', ' ')}{checked}")
     try:
         label = ACTION_LABELS[Act(action)]
     except ValueError:
@@ -2157,7 +2181,7 @@ def _meter_tiles(ctx: _Ctx) -> str:
 
 def _settings_main(ctx: _Ctx, built: Mapping[str, str]) -> str:
     return (f'<main class="main main--tool"><div class="tool tool--split tool--settings">'
-            f'{built["settings"]}{built["about"]}</div></main>')
+            f'{built["settings"]}{built["about"]}{built["options"]}</div></main>')
 
 
 def _settings(ctx: _Ctx) -> str:
@@ -2298,6 +2322,122 @@ def _about(ctx: _Ctx) -> str:
     return ('<section class="panel" aria-labelledby="about-title" data-region="about"><div class="panel__head">'
             f'<h2 class="panel__title" id="about-title">This machine</h2></div><dl class="kv kv--about">{body}</dl>'
             '</section>')
+
+
+def _options_panel(ctx: _Ctx) -> str:
+    options = ctx.state.options
+    if options is None:
+        return ('<section class="panel panel--options" id="machine-options" aria-labelledby="options-title" '
+                'data-region="options" data-source="none"><div class="panel__head">'
+                '<h2 class="panel__title" id="options-title">Machine setup options</h2>'
+                '<p class="panel__meta">Read-only</p></div>'
+                '<p class="panel__about">Not read yet — connect to the machine to read its setup options.</p>'
+                '</section>')
+    is_full = options.source == "firmware"
+    can_edit = (is_full and ctx.state.ext_info is not None
+                and bool(ctx.state.ext_info.capabilities & se.Capability.SET_OPTION))
+    edit_refusal = ctx.admit(Act.SET_OPTION) if can_edit else None
+    in_prog = ctx.state.in_progress
+    saving_code = (str(in_prog.params.get(F_OPTION, ""))
+                   if in_prog is not None and in_prog.name is Act.SET_OPTION else None)
+    if is_full:
+        meta = (f"{len(options.rows)} S6000 options{SEP}SafeRAM"
+                + (f"{SEP}editable" if can_edit else f"{SEP}read-only"))
+        about = ("Read directly from S6000 SafeRAM. Allowlisted options can be saved while the machine is idle; "
+                 "host/SAS link options stay read-only so remote edits cannot cut off the serial connection. "
+                 "Progressive options (02, 07, 78Lo) take full effect after a machine power cycle."
+                 if can_edit else
+                 "Read directly from the S6000 setup option table in SafeRAM. "
+                 "To change these values, use the machine's setup menu with the door open.")
+    else:
+        meta = f"Stock SAS summary{SEP}1F / A0"
+        about = ("Flags reported by stock SAS on the installed EPROMs. "
+                 "Install the updated firmware image (with READ_OPTIONS / SET_OPTION) to view and edit "
+                 "S6000 setup options here.")
+    feedback = _options_feedback(ctx)
+    groups: list[tuple[str, list]] = []
+    by_group: dict[str, list] = {}
+    for row in options.rows:
+        if row.group not in by_group:
+            bucket: list = []
+            by_group[row.group] = bucket
+            groups.append((row.group, bucket))
+        by_group[row.group].append(row)
+    sections = []
+    for title, rows in groups:
+        trs = []
+        for row in rows:
+            if can_edit and row.editable:
+                value_cell = _option_editor(ctx, row, edit_refusal, saving_code == row.code)
+            else:
+                value_cell = _e(row.meaning)
+            trs.append(
+                f'<tr data-option="{_e(row.code)}">'
+                f'<th scope="row" class="options-table__code">{_e(row.code)}</th>'
+                f'<td class="options-table__name">{_e(row.name)}</td>'
+                f'<td class="options-table__raw">{_e(row.raw)}</td>'
+                f'<td class="options-table__meaning">{value_cell}</td></tr>'
+            )
+        sections.append(
+            f'<div class="options-group"><h3 class="options-group__title">{_e(title)}</h3>'
+            '<div class="options-table-wrap"><table class="options-table"><thead><tr>'
+            '<th scope="col">Opt</th><th scope="col">Setting</th><th scope="col">Raw</th>'
+            f'<th scope="col">Value</th></tr></thead><tbody>{"".join(trs)}</tbody></table></div></div>'
+        )
+    return (f'<section class="panel panel--options" id="machine-options" aria-labelledby="options-title" '
+            f'data-region="options" data-source="{_e(options.source)}" '
+            f'data-editable="{"1" if can_edit else "0"}"><div class="panel__head">'
+            f'<h2 class="panel__title" id="options-title">Machine setup options</h2>'
+            f'<p class="panel__meta">{meta}</p></div>'
+            f'<p class="panel__about">{about}</p>{feedback}'
+            f'<div class="options-groups">{"".join(sections)}</div></section>')
+
+
+def _option_editor(ctx: _Ctx, row: so.OptionRow, refusal: ws.Refusal | None, saving: bool) -> str:
+    disabled = ' disabled' if (saving or refusal is not None) else ""
+    if row.choices:
+        opts = "".join(
+            f'<option value="{_e(val)}"{" selected" if val == row.value else ""}>'
+            f'{_e(f"{int(val):04d}" if val.isdigit() else val)} — {_e(label)}</option>'
+            for val, label in row.choices
+        )
+        control = (f'<select class="option-edit__select" name="{F_VALUE}" '
+                   f'aria-label="Option {_e(row.code)} {_e(row.name)}"{disabled}>{opts}</select>')
+    else:
+        placeholder = f"{row.min_val}–{row.max_val}" if row.min_val is not None and row.max_val is not None else ""
+        control = (f'<input class="option-edit__input" name="{F_VALUE}" inputmode="numeric" autocomplete="off" '
+                   f'aria-label="Option {_e(row.code)} {_e(row.name)}" value="{_e(row.value)}" '
+                   f'placeholder="{_e(placeholder)}"{disabled}>')
+    if saving:
+        btn = (f'<button class="btn btn--quiet option-edit__save is-pending" type="button" disabled '
+               f'aria-busy="true" data-part="save-option-{_e(row.code)}">'
+               f'{_icon("loader-circle", "icon icon--s icon--turning")}Saving…</button>')
+    else:
+        btn = (f'<button class="btn btn--quiet option-edit__save" type="submit" '
+               f'data-part="save-option-{_e(row.code)}"{_disabled(refusal)}>Save</button>')
+    reboot = ' <span class="option-edit__note">power-cycle to activate</span>' if row.needs_reboot else ""
+    return (f'<form class="option-edit" method="post" action="/actions/{Act.SET_OPTION.value}">'
+            f'<input type="hidden" name="{F_OPTION}" value="{_e(row.code)}">'
+            f'<input type="hidden" name="{F_RETURN}" value="/settings">'
+            f'{control}{btn}{reboot}</form>')
+
+
+def _options_feedback(ctx: _Ctx) -> str:
+    refused = _refused(ctx, (Act.SET_OPTION,))
+    if refused is not None:
+        return (f'<p class="setting__desc options-feedback"{_not_sent_attrs(refused)}>'
+                f'<span class="dot dot--danger"></span>{_not_sent_text(refused)}</p>')
+    latest = next((r for r in ctx.state.results if r.action is Act.SET_OPTION), None)
+    if latest is None:
+        return ""
+    if latest.state is ResultState.DONE and latest.outcome is OutcomeWord.REFUSED:
+        detail = f" ({latest.machine_status.name})" if latest.machine_status is not None else ""
+        return (f'<p class="setting__desc options-feedback" data-submission="{_e(latest.submission_id)}">'
+                f'<span class="dot dot--danger"></span>The machine refused the option change{detail}.</p>')
+    if latest.state is ResultState.DONE and latest.outcome in (OutcomeWord.CONFIRMED, OutcomeWord.HAPPENED):
+        return (f'<p class="setting__desc options-feedback" data-submission="{_e(latest.submission_id)}">'
+                '<span class="dot dot--ok"></span>Setup option saved to SafeRAM and verified.</p>')
+    return ""
 
 
 _MAINS: Mapping[str, Callable[[_Ctx, Mapping[str, str]], str]] = MappingProxyType({

@@ -367,6 +367,17 @@
               ownApply = { id: answer.submission_id, values: posted };
               rebaseEditor(); // in case its verification arrived first
             }
+            if (action.pathname === "/actions/set-option") {
+              // Unprotect the options region once accepted so the server's Saving… and verified value render.
+              for (const field of form.querySelectorAll(FIELD)) {
+                if (field.tagName === "SELECT") {
+                  for (const opt of field.options) opt.defaultSelected = opt.selected;
+                } else if ("defaultValue" in field && field.type !== "hidden") {
+                  field.defaultValue = field.value;
+                }
+              }
+              if (document.activeElement && form.contains(document.activeElement)) document.activeElement.blur();
+            }
             noteSubmission(answer.submission_id);
           });
         }
